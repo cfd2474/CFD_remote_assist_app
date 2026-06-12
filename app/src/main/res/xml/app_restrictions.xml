@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<restrictions xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <restriction
+        android:key="settings_password"
+        android:title="Settings Password"
+        android:restrictionType="string"
+        android:description="Password to access the settings page"
+        android:defaultValue="admin123" />
+
+    <restriction
+        android:key="connection_secret"
+        android:title="Connection Secret"
+        android:restrictionType="string"
+        android:description="Secret code for unattended remote access"
+        android:defaultValue="secret123" />
+
+    <restriction
+        android:key="tracking_server_url"
+        android:title="Tracking Server URL"
+        android:restrictionType="string"
+        android:description="URL of the server for location tracking"
+        android:defaultValue="https://example.com/track" />
+
+    <restriction
+        android:key="tracking_interval"
+        android:title="Tracking Interval (minutes)"
+        android:restrictionType="integer"
+        android:description="Interval in minutes for sending location updates"
+        android:defaultValue="15" />
+
+</restrictions>

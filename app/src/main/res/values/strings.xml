@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">CFD Remote Assist</string>
+    <string name="accessibility_service_label">Remote Assist Remote Control</string>
+    <string name="accessibility_service_description">Enables remote control for technical assistance.</string>
+</resources>
