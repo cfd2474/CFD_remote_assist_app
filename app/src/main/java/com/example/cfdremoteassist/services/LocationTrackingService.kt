@@ -38,6 +38,7 @@ import com.example.cfdremoteassist.utils.ManagedConfigManager
 import com.example.cfdremoteassist.utils.NetworkManager
 import com.google.android.gms.location.*
 import com.google.gson.JsonObject
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class LocationTrackingService : Service() {
@@ -206,33 +207,10 @@ class LocationTrackingService : Service() {
             return
         }
 
-        val action = json.get("action")?.asString
         try {
-            when (action) {
-                "CLICK" -> {
-                    val x = json.get("x_percent")?.asFloat ?: 0f
-                    val y = json.get("y_percent")?.asFloat ?: 0f
-                    accessibilityService.performClick(x, y)
-                }
-                "LONG_PRESS" -> {
-                    val x = json.get("x_percent")?.asFloat ?: 0f
-                    val y = json.get("y_percent")?.asFloat ?: 0f
-                    accessibilityService.performLongPress(x, y)
-                }
-                "SWIPE" -> {
-                    val x1 = json.get("x_percent")?.asFloat ?: 0f
-                    val y1 = json.get("y_percent")?.asFloat ?: 0f
-                    val x2 = json.get("x2_percent")?.asFloat ?: 0f
-                    val y2 = json.get("y2_percent")?.asFloat ?: 0f
-                    val duration = json.get("duration_ms")?.asLong ?: 350L
-                    accessibilityService.performSwipe(x1, y1, x2, y2, duration)
-                }
-                "KEY" -> {
-                    val key = json.get("key")?.asString ?: ""
-                    val method = json.get("input_method")?.asString ?: "ime"
-                    accessibilityService.handleKeyAction(key, method)
-                }
-            }
+            val jsonString = json.toString()
+            val jsonObject = JSONObject(jsonString)
+            accessibilityService.onControlMessage(jsonObject)
         } catch (e: Exception) {
             Log.e("LocationTracking", "Error executing control input", e)
         }

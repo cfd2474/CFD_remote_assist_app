@@ -14,6 +14,7 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.example.cfdremoteassist.utils.ManagedConfigManager
 import com.example.cfdremoteassist.utils.NetworkManager
+import com.example.cfdremoteassist.remote.RemoteSessionManager
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import org.webrtc.*
@@ -232,6 +233,8 @@ class ScreenShareService : Service() {
         // Use half resolution for better performance and faster start
         captureWidth = metrics.widthPixels / 2
         captureHeight = metrics.heightPixels / 2
+        RemoteSessionManager.captureWidth = captureWidth
+        RemoteSessionManager.captureHeight = captureHeight
         Log.d("ScreenShare", "Starting capture at ${captureWidth}x${captureHeight}")
         videoCapturer!!.startCapture(captureWidth, captureHeight, 30)
 
@@ -262,6 +265,8 @@ class ScreenShareService : Service() {
         Log.i("ScreenShare", "Orientation changed: ${captureWidth}x${captureHeight} -> ${newW}x${newH}")
         captureWidth = newW
         captureHeight = newH
+        RemoteSessionManager.captureWidth = captureWidth
+        RemoteSessionManager.captureHeight = captureHeight
         
         videoCapturer?.changeCaptureFormat(newW, newH, 30)
         
