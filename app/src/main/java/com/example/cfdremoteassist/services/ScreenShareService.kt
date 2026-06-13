@@ -319,7 +319,7 @@ class ScreenShareService : Service() {
                             override fun onSetSuccess() {
                                 Log.d("ScreenShare", "Remote Description Set")
                                 peerConnection?.createAnswer(object : SimpleSdpObserver() {
-                                    override fun onCreateSuccess(answer: SessionDescription) {
+                                    override fun onCreateSuccess(desc: SessionDescription) {
                                         Log.d("ScreenShare", "Answer Created")
                                         peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
                                             override fun onSetSuccess() {
@@ -327,14 +327,14 @@ class ScreenShareService : Service() {
                                                     addProperty("type", "webrtc")
                                                     val sdpAnswer = JsonObject().apply {
                                                         addProperty("type", "answer")
-                                                        addProperty("sdp", answer.description)
+                                                        addProperty("sdp", desc.description)
                                                     }
                                                     add("sdp", sdpAnswer)
                                                 }
                                                 Log.d("ScreenShare", "Sending WebRTC Answer")
                                                 networkManager.sendWebSocketMessage(gson.toJson(answerJson))
                                             }
-                                        }, answer)
+                                        }, desc)
                                     }
                                 }, MediaConstraints())
                             }
