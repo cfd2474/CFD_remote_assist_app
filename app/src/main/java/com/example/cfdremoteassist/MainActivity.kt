@@ -15,6 +15,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Check
 import com.example.cfdremoteassist.services.LocationTrackingService
 import com.example.cfdremoteassist.ui.theme.CFDRemoteAssistTheme
 import com.example.cfdremoteassist.utils.ManagedConfigManager
@@ -53,13 +56,15 @@ fun MainScreen() {
     var registrationError by remember { mutableStateOf<String?>(null) }
     
     val currentServerUrl = configManager.getTrackingServerUrl()
+    val scrollState = rememberScrollState()
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Column(
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -132,6 +137,7 @@ fun MainScreen() {
             onSuccess = {
                 isSettingsUnlocked = true
                 showPasswordDialog = false
+                Toast.makeText(context, "Settings Unlocked", Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -361,44 +367,71 @@ fun PermissionSection() {
         
         Text("Special Access", style = MaterialTheme.typography.titleMedium)
         
-        Button(modifier = Modifier.fillMaxWidth(), onClick = { 
-            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        }) {
-            Text("Enable Remote Control (Accessibility)")
-        }
+        SpecialAccessButton(
+            label = "Enable Remote Control (Accessibility)",
+            enabled = isAccessibilityServiceEnabled(context),
+            onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        )
 
-        Button(modifier = Modifier.fillMaxWidth(), onClick = {
-            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        }) {
-            Text("Enable Notification Access")
-        }
+        SpecialAccessButton(
+            label = "Enable Notification Access",
+            enabled = isNotificationServiceEnabled(context),
+            onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+        )
 
-        Button(modifier = Modifier.fillMaxWidth(), onClick = {
-            if (!Settings.canDrawOverlays(context)) {
-                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+        SpecialAccessButton(
+            label = "Enable Overlay (Draw on screen)",
+            enabled = Settings.canDrawOverlays(context),
+            onClick = {
+                if (!Settings.canDrawOverlays(context)) {
+                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                    context.startActivity(intent)
+                } else {
+                    Toast.makeText(context, "Overlay permission already granted", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+
+        SpecialAccessButton(
+            label = "Enable Usage Stats",
+            enabled = isUsageAccessGranted(context),
+            onClick = {
+                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
                 context.startActivity(intent)
-            } else {
-                Toast.makeText(context, "Overlay permission already granted", Toast.LENGTH_SHORT).show()
             }
-        }) {
-            Text("Enable Overlay (Draw on screen)")
-        }
+        )
 
-        Button(modifier = Modifier.fillMaxWidth(), onClick = {
-            val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-            context.startActivity(intent)
-        }) {
-            Text("Enable Usage Stats")
-        }
-
-        Button(modifier = Modifier.fillMaxWidth(), onClick = {
-            val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
-                putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Required for remote locking and device management.")
+        SpecialAccessButton(
+            label = "Enable Device Admin (For Locking)",
+            enabled = isDeviceAdminActive,
+            onClick = {
+                val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                    putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+                    putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Required for remote locking and device management.")
+                }
+                context.startActivity(intent)
             }
-            context.startActivity(intent)
-        }) {
-            Text(if (isDeviceAdminActive) "Device Admin: Active" else "Enable Device Admin (For Locking)")
+        )
+    }
+}
+
+@Composable
+fun SpecialAccessButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        colors = if (enabled) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                 else ButtonDefaults.buttonColors()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label)
+            if (enabled) {
+                Icon(imageVector = Icons.Default.Check, contentDescription = "Granted")
+            }
         }
     }
 }
