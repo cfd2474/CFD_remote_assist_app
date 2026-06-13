@@ -6,8 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
-import android.os.Build
-import android.os.IBinder
+import android.os.*
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -27,12 +26,12 @@ class ScreenShareService : Service() {
     private val gson = Gson()
     private val serviceExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
-    private var mediaProjection: MediaProjection? = null
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var videoSource: VideoSource? = null
     private var videoCapturer: ScreenCapturerAndroid? = null
     private var localVideoTrack: VideoTrack? = null
+    private var surfaceTextureHelper: SurfaceTextureHelper? = null
 
     companion object {
         const val EXTRA_RESULT_CODE = "result_code"
@@ -70,24 +69,41 @@ class ScreenShareService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> stopSelf()
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
             ACTION_PROCESS_SIGNAL -> {
                 val signal = intent.getStringExtra(EXTRA_SIGNAL)
                 if (signal != null) handleSignalingMessage(signal)
+                return START_NOT_STICKY
             }
             else -> {
                 val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
                 val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
+                
                 if (resultCode == Activity.RESULT_OK && data != null) {
-                    startForegroundService()
-                    startScreenCapture(resultCode, data)
-                } else {
+                    if (videoCapturer == null) {
+                        startForegroundService()
+                        // Small delay to ensure FGS is established before projection starts
+                        handler.post {
+                            try {
+                                startScreenCapture(resultCode, data)
+                            } catch (e: Exception) {
+                                Log.e("ScreenShare", "Projection error: ${e.message}")
+                                stopSelf()
+                            }
+                        }
+                    }
+                } else if (videoCapturer == null) {
                     stopSelf()
                 }
             }
         }
         return START_NOT_STICKY
     }
+
+    private val handler = Handler(Looper.getMainLooper())
 
     private fun startForegroundService() {
         val channelId = "screen_share_channel"
@@ -104,21 +120,25 @@ class ScreenShareService : Service() {
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-        } else {
-            startForeground(2, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else {
+                startForeground(2, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("ScreenShare", "Failed to start foreground service: ${e.message}")
+            stopSelf()
         }
     }
 
     private fun startScreenCapture(resultCode: Int, data: Intent) {
-        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        mediaProjection = projectionManager.getMediaProjection(resultCode, data)
-
         val metrics = DisplayMetrics()
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
+        // WebRTC's ScreenCapturerAndroid will call getMediaProjection internally.
+        // Calling it manually here as well causes a SecurityException: "Don't re-use the resultData".
         videoCapturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
             override fun onStop() {
                 Log.d("ScreenShare", "MediaProjection stopped")
@@ -127,8 +147,12 @@ class ScreenShareService : Service() {
         })
 
         videoSource = peerConnectionFactory?.createVideoSource(videoCapturer!!.isScreencast)
-        videoCapturer!!.initialize(SurfaceTextureHelper.create("WebRTC-SurfaceHelper", EglBase.create().eglBaseContext), this, videoSource!!.capturerObserver)
-        videoCapturer!!.startCapture(metrics.widthPixels / 2, metrics.heightPixels / 2, 30)
+        
+        surfaceTextureHelper = SurfaceTextureHelper.create("WebRTC-SurfaceHelper", EglBase.create().eglBaseContext)
+        videoCapturer!!.initialize(surfaceTextureHelper, this, videoSource!!.capturerObserver)
+        
+        // Use full screen metrics
+        videoCapturer!!.startCapture(metrics.widthPixels, metrics.heightPixels, 30)
 
         localVideoTrack = peerConnectionFactory?.createVideoTrack("VIDEO_TRACK", videoSource)
         
@@ -222,11 +246,16 @@ class ScreenShareService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        videoCapturer?.stopCapture()
-        videoCapturer?.dispose()
-        videoSource?.dispose()
-        peerConnection?.dispose()
-        mediaProjection?.stop()
+        try {
+            videoCapturer?.stopCapture()
+            videoCapturer?.dispose()
+            surfaceTextureHelper?.dispose()
+            videoSource?.dispose()
+            peerConnection?.dispose()
+            peerConnectionFactory?.dispose()
+        } catch (e: Exception) {
+            Log.e("ScreenShare", "Error during disposal: ${e.message}")
+        }
         serviceExecutor.shutdown()
     }
 }

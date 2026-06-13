@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.app.AppOpsManager
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -70,11 +71,16 @@ fun MainScreen() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            val intent = Intent(context, ScreenShareService::class.java).apply {
-                putExtra(ScreenShareService.EXTRA_RESULT_CODE, result.resultCode)
-                putExtra(ScreenShareService.EXTRA_DATA, result.data)
+            try {
+                val intent = Intent(context, ScreenShareService::class.java).apply {
+                    putExtra(ScreenShareService.EXTRA_RESULT_CODE, result.resultCode)
+                    putExtra(ScreenShareService.EXTRA_DATA, result.data)
+                }
+                context.startForegroundService(intent)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to start screen share: ${e.message}")
+                Toast.makeText(context, "Failed to start screen share: ${e.message}", Toast.LENGTH_LONG).show()
             }
-            context.startForegroundService(intent)
         }
     }
 
