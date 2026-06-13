@@ -312,7 +312,11 @@ fun PermissionSection(
         Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALL_LOG
     )
     val mediaPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA, Manifest.permission.READ_CALENDAR).apply {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) add(Manifest.permission.BODY_SENSORS)
+        // Only require Body Sensors if the device actually has them (e.g. Heart Rate)
+        val hasHeartRate = context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_HEART_RATE)
+        if (hasHeartRate) {
+            add(Manifest.permission.BODY_SENSORS)
+        }
     }.toTypedArray()
     
     val storagePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -396,12 +400,25 @@ fun PermissionSection(
                     ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 
                 }
 
+                val deniedPermissions = permissions.filter { 
+                    ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED 
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(groupName)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(groupName)
+                        if (!isGranted && deniedPermissions.isNotEmpty()) {
+                            Text(
+                                text = "Missing: ${deniedPermissions.joinToString { it.substringAfterLast(".") }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                     Button(
                         onClick = { launcher.launch(permissions) },
                         colors = if (isGranted) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) 
