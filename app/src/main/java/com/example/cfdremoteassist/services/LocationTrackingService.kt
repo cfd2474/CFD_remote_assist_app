@@ -13,6 +13,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.RestrictionsManager
+import android.content.pm.ServiceInfo
 import android.location.Location
 import android.media.AudioAttributes
 import android.media.AudioManager
@@ -134,7 +135,18 @@ class LocationTrackingService : Service() {
 
     @SuppressLint("MissingPermission")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(1, createNotification())
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(1, createNotification())
+            }
+        } catch (e: Exception) {
+            Log.e("LocationTracking", "Failed to start foreground service: ${e.message}")
+            // Fallback: stop the service if we can't start foreground to avoid ANR/Crash
+            stopSelf()
+            return START_NOT_STICKY
+        }
         
         when (intent?.action) {
             ACTION_TRIGGER_PING -> startAudiblePing()

@@ -101,8 +101,17 @@ fun MainScreen() {
                         configManager.setRegistered(true)
                         showRegistrationDialog = false
                         isRegistering = false
-                        val intent = Intent(context, LocationTrackingService::class.java)
-                        context.startForegroundService(intent)
+                        
+                        // Check for location permissions before starting service
+                        val hasFineLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        val hasCoarseLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        
+                        if (hasFineLocation || hasCoarseLocation) {
+                            val intent = Intent(context, LocationTrackingService::class.java)
+                            context.startForegroundService(intent)
+                        } else {
+                            Toast.makeText(context, "Registration successful. Please grant location permissions to start tracking.", Toast.LENGTH_LONG).show()
+                        }
                     } else {
                         isRegistering = false
                         registrationError = "Could not connect to $finalUrl. Please check connection and try again."
