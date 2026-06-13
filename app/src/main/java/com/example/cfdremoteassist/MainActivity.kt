@@ -34,6 +34,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.cfdremoteassist.services.LocationTrackingService
 import com.example.cfdremoteassist.ui.theme.CFDRemoteAssistTheme
 import com.example.cfdremoteassist.utils.ManagedConfigManager
+import com.example.cfdremoteassist.utils.NetworkManager
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     val context = LocalContext.current
     val configManager = remember { ManagedConfigManager(context) }
+    val networkManager = remember { NetworkManager(context, configManager) }
     var isSettingsUnlocked by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     
@@ -67,6 +69,7 @@ fun MainScreen() {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshTrigger++
+                isRegistered = configManager.isRegistered()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -85,15 +88,27 @@ fun MainScreen() {
         isRegistering = true
         registrationError = null
         
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            configManager.setRegistered(true)
-            isRegistered = true
+        val deviceInfo = mutableMapOf<String, String>()
+        deviceInfo["uid"] = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        deviceInfo["model"] = Build.MODEL
+        deviceInfo["app_version"] = "1.0.0"
+        try {
+            deviceInfo["device_name"] = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL
+        } catch (e: Exception) {}
+
+        networkManager.register(deviceInfo) { success, error ->
             isRegistering = false
-            
-            val intent = Intent(context, LocationTrackingService::class.java)
-            context.startForegroundService(intent)
-            Toast.makeText(context, "Registration Successful", Toast.LENGTH_SHORT).show()
-        }, 2000)
+            if (success) {
+                isRegistered = true
+                val intent = Intent(context, LocationTrackingService::class.java)
+                context.startForegroundService(intent)
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Toast.makeText(context, "Registration Successful", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                registrationError = error ?: "Registration failed"
+            }
+        }
     }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -108,8 +123,7 @@ fun MainScreen() {
         ) {
             Text(text = "CFD Remote Assist Status", style = MaterialTheme.typography.headlineMedium)
             
-            // Wrap in key to force recomposition and permission re-check on refreshTrigger change
-            key(refreshTrigger) {
+            key(refreshTrigger, isRegistered) {
                 PermissionSection(
                     isRegistered = isRegistered,
                     isRegistering = isRegistering,
@@ -120,7 +134,7 @@ fun MainScreen() {
                 ServiceStatusSection(onRefresh = { refreshTrigger++ })
 
                 if (isRegistered) {
-                    DiagnosticsSection()
+                    DiagnosticsSection(networkManager)
                 }
             }
 
@@ -175,7 +189,7 @@ fun ServiceStatusSection(onRefresh: () -> Unit) {
 }
 
 @Composable
-fun DiagnosticsSection() {
+fun DiagnosticsSection(networkManager: NetworkManager) {
     val context = LocalContext.current
     var isPinging by remember { mutableStateOf(false) }
     var isAdminActive by remember { mutableStateOf(false) }
@@ -198,10 +212,17 @@ fun DiagnosticsSection() {
         Button(
             onClick = {
                 isPinging = true
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                val uid = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                networkManager.ping(uid) { success, error ->
                     isPinging = false
-                    Toast.makeText(context, "Server Ping Successful: EUD Recognized", Toast.LENGTH_LONG).show()
-                }, 1500)
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        if (success) {
+                            Toast.makeText(context, "Server Ping Successful: EUD Recognized", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(context, error ?: "Server Ping Failed", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !isPinging
@@ -312,7 +333,6 @@ fun PermissionSection(
         Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALL_LOG
     )
     val mediaPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA, Manifest.permission.READ_CALENDAR).apply {
-        // Only require Body Sensors if the device actually has them (e.g. Heart Rate)
         val hasHeartRate = context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_HEART_RATE)
         if (hasHeartRate) {
             add(Manifest.permission.BODY_SENSORS)
@@ -355,7 +375,6 @@ fun PermissionSection(
             Toast.makeText(context, "Media & Sensors: Granted", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, "Media Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
-            // If denied, offer to open settings
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = android.net.Uri.fromParts("package", context.packageName, null)
             }

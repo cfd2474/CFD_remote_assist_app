@@ -6,27 +6,41 @@ import android.os.Bundle
 
 class ManagedConfigManager(context: Context) {
     private val restrictionsManager = context.getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
+    private val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
 
     fun getSettingsPassword(): String {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
         return appRestrictions.getString("settings_password", "3757")
     }
 
-    fun getConnectionSecret(): String {
-        val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
-        return appRestrictions.getString("connection_secret", "3757")
-    }
-
     fun getTrackingServerUrl(): String {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
         val managedUrl = appRestrictions.getString("tracking_server_url")
         if (!managedUrl.isNullOrEmpty()) {
-            return managedUrl
+            return managedUrl.trimEnd('/')
         }
         val address = prefs.getString("manual_server_address", "") ?: ""
         val port = prefs.getString("manual_server_port", "") ?: ""
-        if (address.isEmpty()) return ""
-        return "https://$address${if (port.isNotEmpty()) ":$port" else ""}/track"
+        if (address.isEmpty()) return "https://remote.tak-solutions.com"
+        return "https://$address${if (port.isNotEmpty()) ":$port" else ""}".trimEnd('/')
+    }
+
+    fun getConnectionSecret(): String {
+        val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
+        val managedSecret = appRestrictions.getString("connection_secret")
+        if (!managedSecret.isNullOrEmpty()) {
+            return managedSecret
+        }
+        return prefs.getString("cached_connection_secret", "") ?: ""
+    }
+
+    fun setConnectionSecret(secret: String) {
+        prefs.edit().putString("cached_connection_secret", secret).apply()
+    }
+
+    fun clearConnectionSecret() {
+        prefs.edit().remove("cached_connection_secret").apply()
+        setRegistered(false)
     }
 
     fun getManualAddress(): String = prefs.getString("manual_server_address", "") ?: ""
@@ -48,8 +62,6 @@ class ManagedConfigManager(context: Context) {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
         return appRestrictions.getInt("tracking_interval", 15)
     }
-
-    private val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
 
     fun isRegistered(): Boolean = prefs.getBoolean("is_registered", false)
 

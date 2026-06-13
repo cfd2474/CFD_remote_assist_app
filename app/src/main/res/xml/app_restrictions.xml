@@ -20,7 +20,7 @@
         android:title="@string/tracking_server_url_title"
         android:restrictionType="string"
         android:description="@string/tracking_server_url_desc"
-        android:defaultValue="https://example.com/track" />
+        android:defaultValue="https://remote.tak-solutions.com" />
 
     <restriction
         android:key="tracking_interval"

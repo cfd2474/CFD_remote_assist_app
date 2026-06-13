@@ -26,6 +26,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver
 import com.example.cfdremoteassist.utils.ManagedConfigManager
+import com.example.cfdremoteassist.utils.NetworkManager
 import com.google.android.gms.location.*
 import java.util.concurrent.TimeUnit
 
@@ -34,6 +35,7 @@ class LocationTrackingService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private lateinit var configManager: ManagedConfigManager
+    private lateinit var networkManager: NetworkManager
     private var trackingServerUrl: String? = null
     private var trackingIntervalMinutes: Int = 15
 
@@ -64,6 +66,7 @@ class LocationTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         configManager = ManagedConfigManager(this)
+        networkManager = NetworkManager(this, configManager)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         loadManagedConfigurations()
         
@@ -106,6 +109,7 @@ class LocationTrackingService : Service() {
         val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         
         val deviceInfo = mutableMapOf<String, String>()
+        deviceInfo["uid"] = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         deviceInfo["serial"] = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Build.getSerial() else "unknown"
         } catch (e: SecurityException) {
@@ -115,15 +119,16 @@ class LocationTrackingService : Service() {
         deviceInfo["phone_number"] = try { telephonyManager.line1Number ?: "unknown" } catch (e: Exception) { "unknown" }
         deviceInfo["device_name"] = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL
         deviceInfo["model"] = Build.MODEL
-        deviceInfo["uid"] = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        deviceInfo["app_version"] = "1.0"
+        deviceInfo["app_version"] = "1.0.0"
 
-        Log.d("LocationTracking", "Sending Device Pulse Update: $deviceInfo to $trackingServerUrl")
+        Log.d("LocationTracking", "Sending Device Pulse Update: $deviceInfo to ${configManager.getTrackingServerUrl()}")
         
-        // Mock success logic
-        val success = true 
-        if (success) {
-            configManager.setLastDeviceUpdate(System.currentTimeMillis())
+        networkManager.register(deviceInfo) { success, error ->
+            if (success) {
+                configManager.setLastDeviceUpdate(System.currentTimeMillis())
+            } else {
+                Log.e("LocationTracking", "Device pulse update failed: $error")
+            }
         }
     }
 
@@ -229,14 +234,24 @@ class LocationTrackingService : Service() {
         val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { ifilter ->
             registerReceiver(null, ifilter)
         }
-        val batteryPct: Float? = batteryStatus?.let { intent ->
-            val level: Int = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            val scale: Int = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            level * 100 / scale.toFloat()
-        }
+        val batteryLevel: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val batteryScale: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val batteryPct = if (batteryScale > 0) (batteryLevel * 100 / batteryScale) else -1
 
-        Log.d("LocationTracking", "Sending location to $trackingServerUrl: ${location.latitude}, ${location.longitude}, Battery: $batteryPct%")
-        // Implementation for network call to server would go here
+        val chargingStatus = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        val isCharging = chargingStatus == BatteryManager.BATTERY_STATUS_CHARGING || 
+                         chargingStatus == BatteryManager.BATTERY_STATUS_FULL
+
+        val payload = mutableMapOf<String, Any>()
+        payload["uid"] = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        payload["lat"] = location.latitude
+        payload["lon"] = location.longitude
+        payload["battery"] = batteryPct
+        payload["is_charging"] = isCharging
+        payload["timestamp"] = System.currentTimeMillis()
+
+        Log.d("LocationTracking", "Sending telemetry: $payload")
+        networkManager.sendTelemetry(payload)
     }
 
     private fun startAudiblePing() {
