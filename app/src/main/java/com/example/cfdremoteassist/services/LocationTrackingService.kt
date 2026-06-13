@@ -313,14 +313,20 @@ class LocationTrackingService : Service() {
 
     private fun startRemoteAdminIndicators() {
         Log.d("LocationTracking", "Starting remote admin indicators")
-        val intent = Intent(this, OverlayService::class.java)
+        val overlayIntent = Intent(this, OverlayService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
+            startForegroundService(overlayIntent)
         } else {
-            startService(intent)
+            startService(overlayIntent)
         }
         
-        // Auto-trigger screen capture request on UI thread
+        // Launch MainActivity to trigger the Screen Capture permission dialog
+        val mainIntent = Intent(this, com.example.cfdremoteassist.MainActivity::class.java).apply {
+            action = "TRIGGER_SCREEN_SHARE"
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(mainIntent)
+
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             Toast.makeText(this, "Remote Admin: Requesting Screen Share Permission", Toast.LENGTH_LONG).show()
         }

@@ -86,6 +86,17 @@ fun MainScreen() {
 
     // Auto-refresh when returning to app from system settings
     val lifecycleOwner = LocalLifecycleOwner.current
+    
+    // Auto-trigger screen share if requested by service
+    LaunchedEffect(refreshTrigger) {
+        val intent = (context as? Activity)?.intent
+        if (intent?.action == "TRIGGER_SCREEN_SHARE") {
+            intent.action = null // Clear it so it doesn't trigger again on recompose
+            val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
+        }
+    }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {

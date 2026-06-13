@@ -7,6 +7,7 @@ import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.*
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -157,6 +158,12 @@ class ScreenShareService : Service() {
         localVideoTrack = peerConnectionFactory?.createVideoTrack("VIDEO_TRACK", videoSource)
         
         setupPeerConnection()
+
+        // Signal to portal that we are ready for the offer
+        val readyJson = JsonObject().apply {
+            addProperty("type", "webrtc_ready")
+        }
+        networkManager.sendWebSocketMessage(gson.toJson(readyJson))
     }
 
     private fun setupPeerConnection() {
@@ -179,7 +186,16 @@ class ScreenShareService : Service() {
                 networkManager.sendWebSocketMessage(gson.toJson(iceJson))
             }
             override fun onSignalingChange(state: PeerConnection.SignalingState) {}
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {}
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
+                Log.d("ScreenShare", "ICE Connection State: $state")
+                if (state == PeerConnection.IceConnectionState.CONNECTED) {
+                    sendDeviceEvent("REMOTE_SESSION_STARTED")
+                } else if (state == PeerConnection.IceConnectionState.DISCONNECTED || 
+                           state == PeerConnection.IceConnectionState.FAILED || 
+                           state == PeerConnection.IceConnectionState.CLOSED) {
+                    sendDeviceEvent("REMOTE_SESSION_STOPPED")
+                }
+            }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {}
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
@@ -191,6 +207,17 @@ class ScreenShareService : Service() {
         })
 
         peerConnection?.addTrack(localVideoTrack)
+    }
+
+    private fun sendDeviceEvent(eventName: String) {
+        val uid = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        val eventJson = JsonObject().apply {
+            addProperty("type", "device_event")
+            addProperty("uid", uid)
+            addProperty("event", eventName)
+            add("payload", JsonObject())
+        }
+        networkManager.sendWebSocketMessage(gson.toJson(eventJson))
     }
 
     private fun handleSignalingMessage(message: String) {
