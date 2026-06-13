@@ -294,10 +294,6 @@ class ScreenShareService : Service() {
             }
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {}
         })
-
-        Log.d("ScreenShare", "Adding local video track to PeerConnection via Transceiver")
-        val init = RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, listOf("stream0"))
-        peerConnection?.addTransceiver(localVideoTrack, init)
     }
 
     private fun sendDeviceEvent(eventName: String) {
@@ -338,6 +334,11 @@ class ScreenShareService : Service() {
                         peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
                             override fun onSetSuccess() {
                                 Log.d("ScreenShare", "Remote Description Set")
+                                
+                                // Requirement: Add track only after receiving offer
+                                Log.d("ScreenShare", "Adding local video track to PeerConnection (Post-Offer)")
+                                peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
+
                                 peerConnection?.createAnswer(object : SimpleSdpObserver() {
                                     override fun onCreateSuccess(desc: SessionDescription) {
                                         Log.d("ScreenShare", "Answer Created. Local SDP: ${desc.description.take(50)}...")
