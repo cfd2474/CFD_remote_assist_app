@@ -7,6 +7,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.graphics.Path
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.KeyEvent
+import android.os.Bundle
 
 class RemoteAssistAccessibilityService : AccessibilityService() {
 
@@ -126,6 +128,21 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
         dispatchGesture(gestureBuilder.build(), null, null)
     }
 
+    fun performLongPress(xPercent: Float, yPercent: Float) {
+        val metrics = resources.displayMetrics
+        val x = xPercent * metrics.widthPixels
+        val y = yPercent * metrics.heightPixels
+        
+        Log.d("AccessibilityService", "Performing long press at $x, $y")
+        
+        val clickPath = Path().apply {
+            moveTo(x, y)
+        }
+        val gestureBuilder = GestureDescription.Builder()
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(clickPath, 0, 1000))
+        dispatchGesture(gestureBuilder.build(), null, null)
+    }
+
     fun performGlobalAction(action: String) {
         Log.d("AccessibilityService", "Performing global action: $action")
         when (action) {
@@ -135,6 +152,56 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
             "NOTIFICATIONS" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
             "QUICK_SETTINGS" -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
             "POWER_DIALOG" -> performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
+            "DPAD_UP" -> injectKey(KeyEvent.KEYCODE_DPAD_UP)
+            "DPAD_DOWN" -> injectKey(KeyEvent.KEYCODE_DPAD_DOWN)
+            "DPAD_LEFT" -> injectKey(KeyEvent.KEYCODE_DPAD_LEFT)
+            "DPAD_RIGHT" -> injectKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+            "ENTER" -> injectKey(KeyEvent.KEYCODE_ENTER)
+            "DEL", "BACKSPACE" -> injectKey(KeyEvent.KEYCODE_DEL)
+            "SPACE" -> injectKey(KeyEvent.KEYCODE_SPACE)
+            else -> {
+                if (action.length == 1) {
+                    injectChar(action[0])
+                }
+            }
+        }
+    }
+
+    private fun injectKey(keyCode: Int) {
+        when (keyCode) {
+            KeyEvent.KEYCODE_HOME -> performGlobalAction(GLOBAL_ACTION_HOME)
+            KeyEvent.KEYCODE_BACK -> performGlobalAction(GLOBAL_ACTION_BACK)
+            KeyEvent.KEYCODE_APP_SWITCH -> performGlobalAction(GLOBAL_ACTION_RECENTS)
+            KeyEvent.KEYCODE_ENTER -> {
+                rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+            KeyEvent.KEYCODE_DEL -> {
+                val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                if (node != null && node.className?.contains("EditText") == true) {
+                    val currentText = (node.text ?: "").toString()
+                    if (currentText.isNotEmpty()) {
+                        val bundle = Bundle()
+                        bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, currentText.dropLast(1))
+                        node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun injectChar(char: Char) {
+        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (node != null) {
+            val bundle = Bundle()
+            val newText = (node.text ?: "").toString() + char
+            bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+            
+            // Move cursor to end
+            val cursorBundle = Bundle()
+            cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newText.length)
+            cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newText.length)
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursorBundle)
         }
     }
 

@@ -154,9 +154,12 @@ class ScreenShareService : Service() {
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
+        networkManager.setSessionActive(true)
+
         videoCapturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
             override fun onStop() {
                 Log.d("ScreenShare", "MediaProjection stopped")
+                networkManager.setSessionActive(false)
                 stopSelf()
             }
         })
@@ -221,7 +224,10 @@ class ScreenShareService : Service() {
         pollRunnable = object : Runnable {
             override fun run() {
                 networkManager.pollSignaling { messages ->
-                    messages.forEach { handleSignalingJsonObject(it) }
+                    if (messages.isNotEmpty()) {
+                        Log.d("ScreenShare", "Received ${messages.size} signaling messages via HTTP poll")
+                        messages.forEach { handleSignalingJsonObject(it) }
+                    }
                 }
                 pollHandler.postDelayed(this, 2000) // Poll every 2 seconds during active session
             }
@@ -263,10 +269,12 @@ class ScreenShareService : Service() {
                 Log.d("ScreenShare", "ICE Connection State: $state")
                 if (state == PeerConnection.IceConnectionState.CONNECTED) {
                     sendDeviceEvent("REMOTE_SESSION_STARTED")
+                    networkManager.setSessionActive(true)
                 } else if (state == PeerConnection.IceConnectionState.DISCONNECTED || 
                            state == PeerConnection.IceConnectionState.FAILED || 
                            state == PeerConnection.IceConnectionState.CLOSED) {
                     sendDeviceEvent("REMOTE_SESSION_STOPPED")
+                    networkManager.setSessionActive(false)
                 }
             }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
@@ -283,8 +291,9 @@ class ScreenShareService : Service() {
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {}
         })
 
-        Log.d("ScreenShare", "Adding local video track to PeerConnection")
-        peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
+        Log.d("ScreenShare", "Adding local video track to PeerConnection via Transceiver")
+        val init = RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, listOf("stream0"))
+        peerConnection?.addTransceiver(localVideoTrack, init)
     }
 
     private fun sendDeviceEvent(eventName: String) {
@@ -320,9 +329,10 @@ class ScreenShareService : Service() {
                                 Log.d("ScreenShare", "Remote Description Set")
                                 peerConnection?.createAnswer(object : SimpleSdpObserver() {
                                     override fun onCreateSuccess(desc: SessionDescription) {
-                                        Log.d("ScreenShare", "Answer Created")
+                                        Log.d("ScreenShare", "Answer Created. Local SDP: ${desc.description.take(50)}...")
                                         peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
                                             override fun onSetSuccess() {
+                                                Log.d("ScreenShare", "Local Description Set")
                                                 val answerJson = JsonObject().apply {
                                                     addProperty("type", "webrtc")
                                                     val sdpAnswer = JsonObject().apply {
@@ -331,7 +341,7 @@ class ScreenShareService : Service() {
                                                     }
                                                     add("sdp", sdpAnswer)
                                                 }
-                                                Log.d("ScreenShare", "Sending WebRTC Answer")
+                                                Log.d("ScreenShare", "Sending WebRTC Answer. WS Connected: ${networkManager.isWebSocketConnected()}")
                                                 networkManager.sendWebSocketMessage(gson.toJson(answerJson))
                                             }
                                         }, desc)

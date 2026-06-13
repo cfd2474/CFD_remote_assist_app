@@ -122,15 +122,18 @@ class LocationTrackingService : Service() {
                 val secret = configManager.getConnectionSecret()
                 if (secret.isNotEmpty()) {
                     if (!networkManager.isWebSocketConnected()) {
-                        // Check if we are in active remote session, maybe wait longer?
-                        Log.i("LocationTracking", "WebSocket disconnected, attempting reconnect...")
-                        connectRealTimeGateway() 
+                        // CRITICAL: Do not reconnect if a remote session is actively negotiating
+                        if (!networkManager.isSessionActive()) {
+                            Log.i("LocationTracking", "WebSocket disconnected, attempting reconnect...")
+                            connectRealTimeGateway() 
+                        } else {
+                            Log.w("LocationTracking", "WS disconnected during active session. Waiting for session cleanup or manual recovery.")
+                        }
                     } else {
                         // Send keepalive every 30s as per spec
                         networkManager.sendKeepAlive()
                     }
                 }
-                // Use longer interval for the pulse itself, let NetworkManager's internal state guide
                 wsRetryHandler.postDelayed(this, TimeUnit.SECONDS.toMillis(45))
             }
         }
@@ -211,6 +214,11 @@ class LocationTrackingService : Service() {
                     val y = json.get("y_percent")?.asFloat ?: 0f
                     accessibilityService.performClick(x, y)
                 }
+                "LONG_PRESS" -> {
+                    val x = json.get("x_percent")?.asFloat ?: 0f
+                    val y = json.get("y_percent")?.asFloat ?: 0f
+                    accessibilityService.performLongPress(x, y)
+                }
                 "SWIPE" -> {
                     val x1 = json.get("x_percent")?.asFloat ?: 0f
                     val y1 = json.get("y_percent")?.asFloat ?: 0f
@@ -220,7 +228,11 @@ class LocationTrackingService : Service() {
                 }
                 "KEY" -> {
                     val key = json.get("key")?.asString ?: ""
-                    accessibilityService.performGlobalAction(key)
+                    if (key.length == 1) {
+                        accessibilityService.performGlobalAction(key)
+                    } else {
+                        accessibilityService.performGlobalAction(key.uppercase())
+                    }
                 }
             }
         } catch (e: Exception) {

@@ -19,6 +19,13 @@ class NetworkManager private constructor(private val context: Context, private v
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var webSocket: WebSocket? = null
+    private var isSessionActive = false
+
+    fun setSessionActive(active: Boolean) {
+        isSessionActive = active
+    }
+
+    fun isSessionActive(): Boolean = isSessionActive
 
     fun register(deviceInfo: Map<String, String>, callback: (Boolean, String?) -> Unit) {
         val baseUrl = configManager.getTrackingServerUrl()
