@@ -322,34 +322,10 @@ class ScreenShareService : Service() {
             override fun onRemoveStream(stream: MediaStream) {}
             override fun onDataChannel(channel: DataChannel) {}
             override fun onRenegotiationNeeded() {
-                Log.d("ScreenShare", "Renegotiation Needed")
-                if (peerConnection?.signalingState() == PeerConnection.SignalingState.STABLE) {
-                    renegotiate()
-                }
+                Log.d("ScreenShare", "Renegotiation Needed - Waiting for portal offer")
             }
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {}
         })
-    }
-
-    private fun renegotiate() {
-        Log.d("ScreenShare", "Initiating renegotiation answer")
-        peerConnection?.createAnswer(object : SimpleSdpObserver() {
-            override fun onCreateSuccess(desc: SessionDescription) {
-                peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
-                    override fun onSetSuccess() {
-                        val answerJson = JsonObject().apply {
-                            addProperty("type", "webrtc")
-                            val sdpAnswer = JsonObject().apply {
-                                addProperty("type", "answer")
-                                addProperty("sdp", desc.description)
-                            }
-                            add("sdp", sdpAnswer)
-                        }
-                        networkManager.sendWebSocketMessage(gson.toJson(answerJson))
-                    }
-                }, desc)
-            }
-        }, MediaConstraints())
     }
 
     private fun sendDeviceEvent(eventName: String, payload: JsonObject = JsonObject()) {
@@ -392,12 +368,15 @@ class ScreenShareService : Service() {
                                 Log.d("ScreenShare", "Remote Description Set")
                                 
                                 // Requirement: Add track only after receiving offer
-                                val isTrackAlreadyAdded = peerConnection?.senders?.any { it.track()?.id() == localVideoTrack?.id() } ?: false
-                                if (!isTrackAlreadyAdded) {
-                                    Log.d("ScreenShare", "Adding local video track to PeerConnection (Post-Offer)")
-                                    peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
+                                Log.d("ScreenShare", "Associating local video track to Transceiver (Post-Offer)")
+                                val videoTransceiver = peerConnection?.transceivers?.find { 
+                                    it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO 
+                                }
+                                if (videoTransceiver != null) {
+                                    videoTransceiver.sender.setTrack(localVideoTrack, true)
+                                    videoTransceiver.direction = RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
                                 } else {
-                                    Log.d("ScreenShare", "Local video track already added to PeerConnection")
+                                    peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
                                 }
 
                                 peerConnection?.createAnswer(object : SimpleSdpObserver() {
