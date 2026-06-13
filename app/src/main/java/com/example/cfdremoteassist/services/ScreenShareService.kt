@@ -59,20 +59,27 @@ class ScreenShareService : Service() {
     }
 
     private fun initWebRTC() {
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(this)
-                .setEnableInternalTracer(true)
-                .createInitializationOptions()
-        )
+        serviceExecutor.execute {
+            try {
+                PeerConnectionFactory.initialize(
+                    PeerConnectionFactory.InitializationOptions.builder(this)
+                        .setEnableInternalTracer(true)
+                        .createInitializationOptions()
+                )
 
-        eglBase = EglBase.create()
-        val options = PeerConnectionFactory.Options()
-        
-        peerConnectionFactory = PeerConnectionFactory.builder()
-            .setOptions(options)
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase!!.eglBaseContext, true, true))
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase!!.eglBaseContext))
-            .createPeerConnectionFactory()
+                eglBase = EglBase.create()
+                val options = PeerConnectionFactory.Options()
+                
+                peerConnectionFactory = PeerConnectionFactory.builder()
+                    .setOptions(options)
+                    .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase!!.eglBaseContext, true, true))
+                    .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase!!.eglBaseContext))
+                    .createPeerConnectionFactory()
+                Log.d("ScreenShare", "WebRTC Factory Initialized")
+            } catch (e: Exception) {
+                Log.e("ScreenShare", "WebRTC init error: ${e.message}")
+            }
+        }
     }
 
     private var isInitialized = false
@@ -111,6 +118,14 @@ class ScreenShareService : Service() {
                                 Log.e("ScreenShare", "Projection error: ${e.message}")
                                 stopSelf()
                             }
+                        }
+                    } else {
+                        Log.d("ScreenShare", "Already capturing, re-signaling WEBRTC_READY")
+                        if (firstFrameCaptured) {
+                            val readyJson = JsonObject().apply {
+                                addProperty("type", "webrtc_ready")
+                            }
+                            networkManager.sendWebSocketMessage(gson.toJson(readyJson))
                         }
                     }
                 } else if (videoCapturer == null) {
@@ -153,6 +168,11 @@ class ScreenShareService : Service() {
     private var firstFrameCaptured = false
 
     private fun startScreenCapture(resultCode: Int, data: Intent) {
+        if (peerConnectionFactory == null) {
+            Log.w("ScreenShare", "Factory not ready, delaying capture")
+            handler.postDelayed({ startScreenCapture(resultCode, data) }, 500)
+            return
+        }
         val metrics = DisplayMetrics()
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         windowManager.defaultDisplay.getRealMetrics(metrics)
@@ -262,6 +282,14 @@ class ScreenShareService : Service() {
                         if (messages.isNotEmpty()) {
                             Log.d("ScreenShare", "Received ${messages.size} signaling messages via HTTP poll")
                             messages.forEach { handleSignalingJsonObject(it) }
+                        }
+                    } else {
+                        Log.d("ScreenShare", "Already capturing, re-signaling WEBRTC_READY")
+                        if (firstFrameCaptured) {
+                            val readyJson = JsonObject().apply {
+                                addProperty("type", "webrtc_ready")
+                            }
+                            networkManager.sendWebSocketMessage(gson.toJson(readyJson))
                         }
                     }
                 }
@@ -374,9 +402,11 @@ class ScreenShareService : Service() {
                                         it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO 
                                     }
                                     if (videoTransceiver != null) {
+                                        Log.d("ScreenShare", "Found existing video transceiver, setting track")
                                         videoTransceiver.sender.setTrack(localVideoTrack, true)
                                         videoTransceiver.direction = RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
                                     } else {
+                                        Log.d("ScreenShare", "No video transceiver found in offer, adding new track")
                                         peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
                                     }
                                 } catch (e: Exception) {
