@@ -16,7 +16,7 @@ class RemoteControlHandler(
     private val displayWidth: () -> Int,
     /** Physical display height in pixels — `WindowManager.currentWindowMetrics.bounds.height()` */
     private val displayHeight: () -> Int,
-    private val keyInjector: KeyInjector = ChainedKeyInjector(ShellKeyInjector()),
+    private val keyInjector: KeyInjector = ChainedKeyInjector(AccessibilityKeyInjector(service), ShellKeyInjector()),
 ) {
     private val tag = "RemoteControlHandler"
 
