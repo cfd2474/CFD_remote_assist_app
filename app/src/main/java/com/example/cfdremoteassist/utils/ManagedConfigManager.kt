@@ -19,7 +19,20 @@ class ManagedConfigManager(context: Context) {
 
     fun getTrackingServerUrl(): String {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
-        return appRestrictions.getString("tracking_server_url", "https://example.com/track")
+        val managedUrl = appRestrictions.getString("tracking_server_url")
+        if (!managedUrl.isNullOrEmpty()) {
+            return managedUrl
+        }
+        return prefs.getString("manual_server_url", "") ?: ""
+    }
+
+    fun setManualServerUrl(url: String) {
+        prefs.edit().putString("manual_server_url", url).apply()
+    }
+
+    fun hasManagedConfig(): Boolean {
+        val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
+        return !appRestrictions.isEmpty
     }
 
     fun getTrackingInterval(): Int {

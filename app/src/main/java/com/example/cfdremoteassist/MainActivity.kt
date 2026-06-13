@@ -47,7 +47,8 @@ fun MainScreen() {
     var showRegistrationDialog by remember { mutableStateOf(!configManager.isRegistered()) }
     var isRegistering by remember { mutableStateOf(false) }
     var registrationError by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
+    
+    val currentServerUrl = configManager.getTrackingServerUrl()
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -80,16 +81,21 @@ fun MainScreen() {
 
     if (showRegistrationDialog) {
         RegistrationDialog(
-            serverUrl = configManager.getTrackingServerUrl(),
+            initialServerUrl = currentServerUrl,
             isLoading = isRegistering,
             errorMessage = registrationError,
-            onRegister = {
+            onRegister = { finalUrl ->
                 isRegistering = true
                 registrationError = null
                 
+                // Save manual URL if it was provided
+                if (!configManager.hasManagedConfig()) {
+                    configManager.setManualServerUrl(finalUrl)
+                }
+
                 // Simulate network registration call
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    val success = false // Simulate a failure to test error handling
+                    val success = true // Changed to true for testing manual input
                     
                     if (success) {
                         configManager.setRegistered(true)
@@ -99,7 +105,7 @@ fun MainScreen() {
                         context.startForegroundService(intent)
                     } else {
                         isRegistering = false
-                        registrationError = "Could not connect to management server. Please check connection and try again."
+                        registrationError = "Could not connect to $finalUrl. Please check connection and try again."
                     }
                 }, 2000)
             }
@@ -359,23 +365,49 @@ fun SettingsPanel(configManager: ManagedConfigManager, onLock: () -> Unit) {
 
 @Composable
 fun RegistrationDialog(
-    serverUrl: String, 
+    initialServerUrl: String, 
     isLoading: Boolean, 
     errorMessage: String?, 
-    onRegister: () -> Unit
+    onRegister: (String) -> Unit
 ) {
+    var address by remember { mutableStateOf("") }
+    var port by remember { mutableStateOf("") }
+    
+    // If we have an initial URL (from managed config or previous manual), split it
+    LaunchedEffect(initialServerUrl) {
+        if (initialServerUrl.isNotEmpty()) {
+            val cleanUrl = initialServerUrl.replace("https://", "").replace("http://", "")
+            val parts = cleanUrl.split(":")
+            address = parts[0].split("/")[0]
+            if (parts.size > 1) {
+                port = parts[1].split("/")[0]
+            }
+        }
+    }
+
     AlertDialog(
-        onDismissRequest = { }, // Force registration
+        onDismissRequest = { }, 
         title = { Text("Registration Required") },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Text("This device needs to be registered with the management server:")
-                Text(
-                    text = serverUrl, 
-                    style = MaterialTheme.typography.bodyLarge, 
-                    modifier = Modifier.padding(vertical = 8.dp)
+                Text("Enter the management server details:")
+                
+                TextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Server Address (e.g. 192.168.1.50)") },
+                    modifier = Modifier.padding(top = 8.dp),
+                    enabled = !isLoading
                 )
                 
+                TextField(
+                    value = port,
+                    onValueChange = { port = it },
+                    label = { Text("Port (e.g. 8080)") },
+                    modifier = Modifier.padding(top = 8.dp),
+                    enabled = !isLoading
+                )
+
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
                     Text("Registering...", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
@@ -393,8 +425,11 @@ fun RegistrationDialog(
         },
         confirmButton = {
             Button(
-                onClick = onRegister,
-                enabled = !isLoading
+                onClick = { 
+                    val finalUrl = "https://$address${if(port.isNotEmpty()) ":$port" else ""}/track"
+                    onRegister(finalUrl) 
+                },
+                enabled = !isLoading && address.isNotEmpty()
             ) {
                 Text("Register with Server")
             }
