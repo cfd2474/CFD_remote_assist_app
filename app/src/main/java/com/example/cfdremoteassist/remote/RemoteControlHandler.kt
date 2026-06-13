@@ -16,7 +16,7 @@ class RemoteControlHandler(
     private val displayWidth: () -> Int,
     /** Physical display height in pixels — `WindowManager.currentWindowMetrics.bounds.height()` */
     private val displayHeight: () -> Int,
-    private val keyInjector: KeyInjector = ChainedKeyInjector(InstrumentationKeyInjector(), ShellKeyInjector()),
+    private val keyInjector: KeyInjector = ChainedKeyInjector(ShellKeyInjector()),
 ) {
     private val tag = "RemoteControlHandler"
 
@@ -145,10 +145,7 @@ class RemoteControlHandler(
             return
         }
 
-        val source = when (inputMethod) {
-            "hardware_keyboard" -> InputDevice.SOURCE_KEYBOARD
-            else -> InputDevice.SOURCE_KEYBOARD
-        }
+        val source = InputDevice.SOURCE_KEYBOARD
 
         val down = KeyEvent(
             SystemClock.uptimeMillis(),

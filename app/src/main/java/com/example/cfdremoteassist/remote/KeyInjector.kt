@@ -1,33 +1,21 @@
 package com.example.cfdremoteassist.remote
 
-import android.accessibilityservice.AccessibilityService
-import android.os.Build
 import android.util.Log
 import android.view.KeyEvent
-
-import android.app.Instrumentation
 
 interface KeyInjector {
     fun inject(event: KeyEvent): Boolean
 }
 
-class InstrumentationKeyInjector : KeyInjector {
-    private val instrumentation = Instrumentation()
-    
-    override fun inject(event: KeyEvent): Boolean {
-        return try {
-            instrumentation.sendKeySync(event)
-            true
-        } catch (e: Exception) {
-            Log.w("KeyInjector", "Instrumentation inject failed", e)
-            false
-        }
-    }
-}
-
+/**
+ * Fallback injector that uses the 'input keyevent' shell command.
+ * Requires device-owner or privileged shell permissions on managed devices.
+ */
 class ShellKeyInjector : KeyInjector {
     override fun inject(event: KeyEvent): Boolean {
-        if (event.action != KeyEvent.ACTION_DOWN) return true // one shot per key
+        // We only need to inject one event per key press for shell commands
+        if (event.action != KeyEvent.ACTION_DOWN) return true 
+
         return try {
             val cmd = arrayOf("sh", "-c", "input keyevent ${event.keyCode}")
             Runtime.getRuntime().exec(cmd).waitFor() == 0
