@@ -34,6 +34,7 @@ class ScreenShareService : Service() {
     private var localVideoTrack: VideoTrack? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var eglBase: EglBase? = null
+    private var lastProcessedOfferSdp: String? = null
     
     private val pollHandler = Handler(Looper.getMainLooper())
     private var pollRunnable: Runnable? = null
@@ -223,10 +224,13 @@ class ScreenShareService : Service() {
     private fun startSignalingPoll() {
         pollRunnable = object : Runnable {
             override fun run() {
-                networkManager.pollSignaling { messages ->
-                    if (messages.isNotEmpty()) {
-                        Log.d("ScreenShare", "Received ${messages.size} signaling messages via HTTP poll")
-                        messages.forEach { handleSignalingJsonObject(it) }
+                // Requirement: stop HTTP signaling poll while the device WebSocket is connected and healthy
+                if (!networkManager.isWebSocketConnected()) {
+                    networkManager.pollSignaling { messages ->
+                        if (messages.isNotEmpty()) {
+                            Log.d("ScreenShare", "Received ${messages.size} signaling messages via HTTP poll")
+                            messages.forEach { handleSignalingJsonObject(it) }
+                        }
                     }
                 }
                 pollHandler.postDelayed(this, 2000) // Poll every 2 seconds during active session
@@ -321,7 +325,14 @@ class ScreenShareService : Service() {
                     val sdpType = sdpObj.get("type")?.asString
                     val sdpDesc = sdpObj.get("sdp")?.asString
                     if (sdpType == "offer" && sdpDesc != null) {
-                        Log.d("ScreenShare", "Processing WebRTC Offer")
+                        // Requirement: ignore same offer if already handled, or if it's stale
+                        if (sdpDesc == lastProcessedOfferSdp) {
+                            Log.d("ScreenShare", "Skipping already processed WebRTC Offer")
+                            return
+                        }
+                        
+                        Log.d("ScreenShare", "Processing new WebRTC Offer")
+                        lastProcessedOfferSdp = sdpDesc
                         val sdp = SessionDescription(SessionDescription.Type.OFFER, sdpDesc)
                         
                         peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
@@ -374,6 +385,7 @@ class ScreenShareService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        lastProcessedOfferSdp = null
         pollRunnable?.let { pollHandler.removeCallbacks(it) }
         try {
             videoCapturer?.stopCapture()
