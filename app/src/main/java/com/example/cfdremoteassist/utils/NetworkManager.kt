@@ -103,7 +103,7 @@ class NetworkManager(private val context: Context, private val configManager: Ma
         })
     }
 
-    fun sendTelemetry(payload: Map<String, Any>) {
+    fun sendTelemetry(payload: Map<String, Any>, onCommandsReceived: (List<JsonObject>) -> Unit = {}) {
         val baseUrl = configManager.getTrackingServerUrl()
         val secret = configManager.getConnectionSecret()
         if (baseUrl.isEmpty() || secret.isEmpty()) return
@@ -127,18 +127,31 @@ class NetworkManager(private val context: Context, private val configManager: Ma
                 if (response.code == 401) {
                     Log.w("NetworkManager", "Telemetry auth failed. Clearing secret.")
                     configManager.clearConnectionSecret()
+                } else if (response.code == 200) {
+                    val bodyString = response.body?.string()
+                    if (bodyString != null) {
+                        try {
+                            val jsonObject = gson.fromJson(bodyString, JsonObject::class.java)
+                            val commandsArray = jsonObject.getAsJsonArray("commands")
+                            if (commandsArray != null && commandsArray.size() > 0) {
+                                val commands = mutableListOf<JsonObject>()
+                                commandsArray.forEach { commands.add(it.asJsonObject) }
+                                onCommandsReceived(commands)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("NetworkManager", "Error parsing telemetry commands", e)
+                        }
+                    }
                 }
                 response.close()
             }
         })
     }
 
-    fun connectWebSocket(uid: String, secret: String, onCommand: (String) -> Unit) {
+    fun connectWebSocket(uid: String, secret: String, onMessageReceived: (JsonObject) -> Unit) {
         val baseUrl = configManager.getTrackingServerUrl()
         if (baseUrl.isEmpty()) return
         
-        // If already connected, don't re-create unless necessary
-        // For now, let's keep it simple and rely on the service to manage lifecycle
         if (webSocket != null) return
 
         val wsUrl = baseUrl.replace("https://", "wss://")
@@ -162,33 +175,38 @@ class NetworkManager(private val context: Context, private val configManager: Ma
                 Log.d("NetworkManager", "WS Message: $text")
                 try {
                     val json = gson.fromJson(text, JsonObject::class.java)
-                    when (json.get("type")?.asString) {
-                        "auth_ok" -> Log.i("NetworkManager", "WS Auth Successful")
-                        "webrtc" -> onCommand("WEBRTC_SIGNAL:$text")
-                        "command" -> {
-                            val cmd = json.get("command")?.asString
-                            val incomingSecret = json.get("connection_secret")?.asString
-                            if (cmd != null && incomingSecret == secret) {
-                                onCommand(cmd)
-                            } else {
-                                Log.w("NetworkManager", "WS Command rejected: Invalid secret or missing cmd")
-                            }
-                        }
-                    }
+                    onMessageReceived(json)
                 } catch (e: Exception) {
                     Log.e("NetworkManager", "Error parsing WS message", e)
                 }
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                Log.d("NetworkManager", "WebSocket Closing ($code): $reason")
                 webSocket.close(1000, null)
-                Log.d("NetworkManager", "WebSocket Closing: $reason")
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.d("NetworkManager", "WebSocket Closed ($code)")
+                this@NetworkManager.webSocket = null
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e("NetworkManager", "WebSocket Failure: ${t.message}")
+                this@NetworkManager.webSocket = null
             }
         })
+    }
+
+    fun sendKeepAlive() {
+        val ping = JsonObject().apply {
+            addProperty("type", "ping")
+        }
+        webSocket?.send(gson.toJson(ping))
+    }
+
+    fun sendWebSocketMessage(json: String) {
+        webSocket?.send(json)
     }
 
     fun disconnectWebSocket() {
@@ -196,11 +214,7 @@ class NetworkManager(private val context: Context, private val configManager: Ma
         webSocket = null
     }
 
-    fun sendWebSocketMessage(json: String) {
-        webSocket?.send(json)
-    }
-
-    fun pollCommands(callback: (List<String>) -> Unit) {
+    fun pollCommands(onCommandsReceived: (List<JsonObject>) -> Unit) {
         val baseUrl = configManager.getTrackingServerUrl()
         val secret = configManager.getConnectionSecret()
         if (baseUrl.isEmpty() || secret.isEmpty()) return
@@ -219,9 +233,15 @@ class NetworkManager(private val context: Context, private val configManager: Ma
                     val body = response.body?.string() ?: return
                     try {
                         val json = gson.fromJson(body, JsonObject::class.java)
-                        val commands = json.getAsJsonArray("commands")?.map { it.asString } ?: emptyList()
-                        callback(commands)
+                        val commandsArray = json.getAsJsonArray("commands")
+                        if (commandsArray != null && commandsArray.size() > 0) {
+                            val commands = mutableListOf<JsonObject>()
+                            commandsArray.forEach { commands.add(it.asJsonObject) }
+                            onCommandsReceived(commands)
+                        }
                     } catch (e: Exception) {}
+                } else if (response.code == 401) {
+                    configManager.clearConnectionSecret()
                 }
                 response.close()
             }

@@ -37,6 +37,7 @@ import com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver
 import com.example.cfdremoteassist.utils.ManagedConfigManager
 import com.example.cfdremoteassist.utils.NetworkManager
 import com.google.android.gms.location.*
+import com.google.gson.JsonObject
 import java.util.concurrent.TimeUnit
 
 class LocationTrackingService : Service() {
@@ -107,7 +108,7 @@ class LocationTrackingService : Service() {
         pollRunnable = object : Runnable {
             override fun run() {
                 networkManager.pollCommands { commands ->
-                    commands.forEach { handleRemoteCommand(it) }
+                    commands.forEach { handleIncomingJsonCommand(it) }
                 }
                 pollHandler.postDelayed(this, TimeUnit.SECONDS.toMillis(30))
             }
@@ -118,15 +119,15 @@ class LocationTrackingService : Service() {
     private fun scheduleWSPulse() {
         wsRetryRunnable = object : Runnable {
             override fun run() {
-                // Ensure WS is connected if secret is present
                 val secret = configManager.getConnectionSecret()
                 if (secret.isNotEmpty()) {
-                    connectRealTimeGateway() // Logic inside NetworkManager handles existing connections
+                    connectRealTimeGateway() 
+                    networkManager.sendKeepAlive()
                 }
-                wsRetryHandler.postDelayed(this, TimeUnit.MINUTES.toMillis(1))
+                wsRetryHandler.postDelayed(this, TimeUnit.SECONDS.toMillis(60))
             }
         }
-        wsRetryHandler.postDelayed(wsRetryRunnable!!, TimeUnit.MINUTES.toMillis(1))
+        wsRetryHandler.postDelayed(wsRetryRunnable!!, TimeUnit.SECONDS.toMillis(60))
     }
 
     private fun connectRealTimeGateway() {
@@ -138,24 +139,43 @@ class LocationTrackingService : Service() {
             return
         }
 
-        networkManager.connectWebSocket(uid, secret) { command ->
-            handleRemoteCommand(command)
+        networkManager.connectWebSocket(uid, secret) { json ->
+            handleGenericWSMessage(json)
         }
     }
 
-    private fun handleRemoteCommand(command: String) {
-        if (command.startsWith("WEBRTC_SIGNAL:")) {
-            val signalJson = command.removePrefix("WEBRTC_SIGNAL:")
-            val intent = Intent(this, ScreenShareService::class.java).apply {
-                action = ScreenShareService.ACTION_PROCESS_SIGNAL
-                putExtra(ScreenShareService.EXTRA_SIGNAL, signalJson)
+    private fun handleGenericWSMessage(json: JsonObject) {
+        val secret = configManager.getConnectionSecret()
+        val type = json.get("type")?.asString
+        
+        when (type) {
+            "command" -> {
+                val incomingSecret = json.get("connection_secret")?.asString
+                if (incomingSecret == secret) {
+                    handleIncomingJsonCommand(json)
+                }
             }
-            startService(intent)
-            return
+            "webrtc" -> {
+                val intent = Intent(this, ScreenShareService::class.java).apply {
+                    action = ScreenShareService.ACTION_PROCESS_SIGNAL
+                    putExtra(ScreenShareService.EXTRA_SIGNAL, json.toString())
+                }
+                startService(intent)
+            }
+            "control" -> {
+                handleRemoteControl(json)
+            }
+            "auth_ok" -> Log.i("LocationTracking", "WebSocket Authenticated")
+            "pong" -> Log.d("LocationTracking", "WS Heartbeat received")
         }
+    }
 
+    private fun handleIncomingJsonCommand(json: JsonObject) {
+        val cmd = json.get("command")?.asString ?: return
+        Log.i("LocationTracking", "Executing Command: $cmd")
+        
         val intent = Intent(this, LocationTrackingService::class.java).apply {
-            action = when (command) {
+            action = when (cmd) {
                 "TRIGGER_PING" -> ACTION_TRIGGER_PING
                 "REQUEST_LOCATION" -> ACTION_REQUEST_LOCATION
                 "START_REMOTE_ADMIN" -> ACTION_START_REMOTE_ADMIN
@@ -167,6 +187,42 @@ class LocationTrackingService : Service() {
         if (intent.action != null) {
             startService(intent)
         }
+    }
+
+    private fun handleRemoteControl(json: JsonObject) {
+        val accessibilityService = RemoteAssistAccessibilityService.instance
+        if (accessibilityService == null) {
+            Log.w("LocationTracking", "Control rejected: Accessibility Service not running")
+            return
+        }
+
+        val action = json.get("action")?.asString
+        try {
+            when (action) {
+                "CLICK" -> {
+                    val x = json.get("x_percent")?.asFloat ?: 0f
+                    val y = json.get("y_percent")?.asFloat ?: 0f
+                    accessibilityService.performClick(x, y)
+                }
+                "SWIPE" -> {
+                    val x1 = json.get("x_percent")?.asFloat ?: 0f
+                    val y1 = json.get("y_percent")?.asFloat ?: 0f
+                    val x2 = json.get("x2_percent")?.asFloat ?: 0f
+                    val y2 = json.get("y2_percent")?.asFloat ?: 0f
+                    accessibilityService.performSwipe(x1, y1, x2, y2)
+                }
+                "KEY" -> {
+                    val key = json.get("key")?.asString ?: ""
+                    accessibilityService.performGlobalAction(key)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("LocationTracking", "Error executing control input", e)
+        }
+    }
+
+    private fun handleRemoteCommand(command: String) {
+        // This old method is replaced by handleIncomingJsonCommand
     }
 
     private fun scheduleDeviceUpdatePulse() {

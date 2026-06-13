@@ -169,8 +169,12 @@ class ScreenShareService : Service() {
             override fun onIceCandidate(candidate: IceCandidate) {
                 val iceJson = JsonObject().apply {
                     addProperty("type", "webrtc")
-                    addProperty("signal", "ice")
-                    add("candidate", gson.toJsonTree(candidate))
+                    val iceObj = JsonObject().apply {
+                        addProperty("candidate", candidate.sdp)
+                        addProperty("sdpMid", candidate.sdpMid)
+                        addProperty("sdpMLineIndex", candidate.sdpMLineIndex)
+                    }
+                    add("ice", iceObj)
                 }
                 networkManager.sendWebSocketMessage(gson.toJson(iceJson))
             }
@@ -192,38 +196,39 @@ class ScreenShareService : Service() {
     private fun handleSignalingMessage(message: String) {
         try {
             val json = gson.fromJson(message, JsonObject::class.java)
-            val signal = json.get("signal")?.asString
+            val signalType = json.get("type")?.asString
             
-            when (signal) {
-                "offer" -> {
-                    val sdpObj = json.getAsJsonObject("sdp")
-                    val sdp = SessionDescription(
-                        SessionDescription.Type.OFFER,
-                        sdpObj.get("description").asString
-                    )
-                    peerConnection?.setRemoteDescription(SimpleSdpObserver {
-                        peerConnection?.createAnswer(SimpleSdpObserver { answer ->
-                            peerConnection?.setLocalDescription(SimpleSdpObserver {
-                                val answerJson = JsonObject().apply {
-                                    addProperty("type", "webrtc")
-                                    addProperty("signal", "answer")
-                                    val sdpAnswer = JsonObject().apply {
-                                        addProperty("type", answer.type.canonicalForm())
-                                        addProperty("description", answer.description)
+            // spec says "webrtc" type is used for relaying
+            if (signalType == "webrtc") {
+                val sdpObj = json.getAsJsonObject("sdp")
+                val iceObj = json.getAsJsonObject("ice")
+
+                if (sdpObj != null) {
+                    val sdpType = sdpObj.get("type")?.asString
+                    val sdpDesc = sdpObj.get("sdp")?.asString
+                    if (sdpType == "offer" && sdpDesc != null) {
+                        val sdp = SessionDescription(SessionDescription.Type.OFFER, sdpDesc)
+                        peerConnection?.setRemoteDescription(SimpleSdpObserver {
+                            peerConnection?.createAnswer(SimpleSdpObserver { answer ->
+                                peerConnection?.setLocalDescription(SimpleSdpObserver {
+                                    val answerJson = JsonObject().apply {
+                                        addProperty("type", "webrtc")
+                                        val sdpAnswer = JsonObject().apply {
+                                            addProperty("type", "answer")
+                                            addProperty("sdp", answer.description)
+                                        }
+                                        add("sdp", sdpAnswer)
                                     }
-                                    add("sdp", sdpAnswer)
-                                }
-                                networkManager.sendWebSocketMessage(gson.toJson(answerJson))
-                            }, null)
-                        }, MediaConstraints())
-                    }, sdp)
-                }
-                "ice" -> {
-                    val candidateObj = json.getAsJsonObject("candidate")
+                                    networkManager.sendWebSocketMessage(gson.toJson(answerJson))
+                                }, null)
+                            }, MediaConstraints())
+                        }, sdp)
+                    }
+                } else if (iceObj != null) {
                     val candidate = IceCandidate(
-                        candidateObj.get("sdpMid").asString,
-                        candidateObj.get("sdpMLineIndex").asInt,
-                        candidateObj.get("sdp").asString
+                        iceObj.get("sdpMid").asString,
+                        iceObj.get("sdpMLineIndex").asInt,
+                        iceObj.get("candidate").asString
                     )
                     peerConnection?.addIceCandidate(candidate)
                 }
