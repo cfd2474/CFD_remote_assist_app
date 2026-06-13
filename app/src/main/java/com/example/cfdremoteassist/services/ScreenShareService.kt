@@ -167,6 +167,7 @@ class ScreenShareService : Service() {
             addProperty("type", "webrtc_ready")
         }
         networkManager.sendWebSocketMessage(gson.toJson(readyJson))
+        sendDeviceEvent("WEBRTC_READY")
         
         startSignalingPoll()
     }
@@ -257,21 +258,30 @@ class ScreenShareService : Service() {
                     if (sdpType == "offer" && sdpDesc != null) {
                         Log.d("ScreenShare", "Processing WebRTC Offer")
                         val sdp = SessionDescription(SessionDescription.Type.OFFER, sdpDesc)
-                        peerConnection?.setRemoteDescription(SimpleSdpObserver {
-                            peerConnection?.createAnswer(SimpleSdpObserver { answer ->
-                                peerConnection?.setLocalDescription(SimpleSdpObserver {
-                                    val answerJson = JsonObject().apply {
-                                        addProperty("type", "webrtc")
-                                        val sdpAnswer = JsonObject().apply {
-                                            addProperty("type", "answer")
-                                            addProperty("sdp", answer.description)
-                                        }
-                                        add("sdp", sdpAnswer)
+                        
+                        peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
+                            override fun onSetSuccess() {
+                                Log.d("ScreenShare", "Remote Description Set")
+                                peerConnection?.createAnswer(object : SimpleSdpObserver() {
+                                    override fun onCreateSuccess(answer: SessionDescription) {
+                                        Log.d("ScreenShare", "Answer Created")
+                                        peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
+                                            override fun onSetSuccess() {
+                                                val answerJson = JsonObject().apply {
+                                                    addProperty("type", "webrtc")
+                                                    val sdpAnswer = JsonObject().apply {
+                                                        addProperty("type", "answer")
+                                                        addProperty("sdp", answer.description)
+                                                    }
+                                                    add("sdp", sdpAnswer)
+                                                }
+                                                Log.d("ScreenShare", "Sending WebRTC Answer")
+                                                networkManager.sendWebSocketMessage(gson.toJson(answerJson))
+                                            }
+                                        }, answer)
                                     }
-                                    Log.d("ScreenShare", "Sending WebRTC Answer")
-                                    networkManager.sendWebSocketMessage(gson.toJson(answerJson))
-                                }, null)
-                            }, MediaConstraints())
+                                }, MediaConstraints())
+                            }
                         }, sdp)
                     }
                 } else if (iceObj != null) {
@@ -289,15 +299,11 @@ class ScreenShareService : Service() {
         }
     }
 
-    private inner class SimpleSdpObserver(
-        val onSuccessFunc: (SessionDescription) -> Unit
-    ) : SdpObserver {
-        override fun onCreateSuccess(desc: SessionDescription) {
-            onSuccessFunc(desc)
-        }
+    private open class SimpleSdpObserver : SdpObserver {
+        override fun onCreateSuccess(desc: SessionDescription) {}
         override fun onSetSuccess() {}
-        override fun onCreateFailure(p0: String?) {}
-        override fun onSetFailure(p0: String?) {}
+        override fun onCreateFailure(p0: String?) { Log.e("ScreenShare", "SDP Create Failure: $p0") }
+        override fun onSetFailure(p0: String?) { Log.e("ScreenShare", "SDP Set Failure: $p0") }
     }
 
     override fun onDestroy() {
