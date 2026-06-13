@@ -33,6 +33,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.app.Activity
+import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import com.example.cfdremoteassist.services.LocationTrackingService
 import com.example.cfdremoteassist.services.ScreenShareService
@@ -91,9 +92,18 @@ fun MainScreen() {
     LaunchedEffect(refreshTrigger) {
         val intent = (context as? Activity)?.intent
         if (intent?.action == "TRIGGER_SCREEN_SHARE") {
-            intent.action = null // Clear it so it doesn't trigger again on recompose
+            intent.action = null 
             val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
+            
+            val captureIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // Force full screen sharing on Android 14+
+                val config = MediaProjectionConfig.createConfigForDefaultDisplay()
+                projectionManager.createScreenCaptureIntent(config)
+            } else {
+                projectionManager.createScreenCaptureIntent()
+            }
+            
+            screenCaptureLauncher.launch(captureIntent)
         }
     }
 

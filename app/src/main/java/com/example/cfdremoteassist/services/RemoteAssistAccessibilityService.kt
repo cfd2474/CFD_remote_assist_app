@@ -3,6 +3,7 @@ package com.example.cfdremoteassist.services
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.graphics.Path
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -10,7 +11,42 @@ import android.view.accessibility.AccessibilityEvent
 class RemoteAssistAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Handle accessibility events if needed
+        if (event == null) return
+
+        // Auto-accept Screen Share / Media Projection dialog
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
+            event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            
+            val packageName = event.packageName?.toString()
+            if (packageName == "com.android.systemui" || packageName == "com.google.android.systemui") {
+                findAndClickMediaProjectionButtons(rootInActiveWindow)
+            }
+        }
+    }
+
+    private fun findAndClickMediaProjectionButtons(node: AccessibilityNodeInfo?) {
+        if (node == null) return
+
+        // 1. Look for "Start now" or "Allow" buttons
+        val textToFind = listOf("Start now", "Allow", "Entire screen", "Start recording")
+        
+        for (text in textToFind) {
+            val nodes = node.findAccessibilityNodeInfosByText(text)
+            for (foundNode in nodes) {
+                if (foundNode.isClickable) {
+                    Log.d("AccessibilityService", "Auto-clicking button: $text")
+                    foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    foundNode.recycle()
+                    return
+                }
+                foundNode.recycle()
+            }
+        }
+
+        // 2. Recursive search for children
+        for (i in 0 until node.childCount) {
+            findAndClickMediaProjectionButtons(node.getChild(i))
+        }
     }
 
     override fun onInterrupt() {
