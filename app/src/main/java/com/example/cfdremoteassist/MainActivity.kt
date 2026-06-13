@@ -583,8 +583,7 @@ fun SpecialAccessButton(label: String, enabled: Boolean, onClick: () -> Unit) {
 @Composable
 fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit, onLock: () -> Unit) {
     val context = LocalContext.current
-    var manualAddress by remember { mutableStateOf(configManager.getManualAddress()) }
-    var manualPort by remember { mutableStateOf(configManager.getManualPort()) }
+    var manualUrl by remember { mutableStateOf(configManager.getTrackingServerUrl()) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -597,20 +596,14 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
             } else {
                 Text("Server Configuration (Manual):", style = MaterialTheme.typography.titleSmall)
                 TextField(
-                    value = manualAddress,
-                    onValueChange = { manualAddress = it },
-                    label = { Text("Server Address") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                TextField(
-                    value = manualPort,
-                    onValueChange = { manualPort = it },
-                    label = { Text("Port") },
+                    value = manualUrl,
+                    onValueChange = { manualUrl = it },
+                    label = { Text("Server URL (e.g. https://remote.tak-solutions.com)") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Button(onClick = {
-                    configManager.setManualServerConfig(manualAddress, manualPort)
-                    Toast.makeText(context, "Server Config Saved", Toast.LENGTH_SHORT).show()
+                    configManager.setManualServerUrl(manualUrl)
+                    Toast.makeText(context, "Server URL Saved", Toast.LENGTH_SHORT).show()
                 }) {
                     Text("Save Server Config")
                 }

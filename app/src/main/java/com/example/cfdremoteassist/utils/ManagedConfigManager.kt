@@ -19,10 +19,11 @@ class ManagedConfigManager(context: Context) {
         if (!managedUrl.isNullOrEmpty()) {
             return managedUrl.trimEnd('/')
         }
-        val address = prefs.getString("manual_server_address", "") ?: ""
-        val port = prefs.getString("manual_server_port", "") ?: ""
-        if (address.isEmpty()) return "https://remote.tak-solutions.com"
-        return "https://$address${if (port.isNotEmpty()) ":$port" else ""}".trimEnd('/')
+        return prefs.getString("manual_server_url", "https://remote.tak-solutions.com") ?: "https://remote.tak-solutions.com"
+    }
+
+    fun setManualServerUrl(url: String) {
+        prefs.edit().putString("manual_server_url", url.trimEnd('/')).apply()
     }
 
     fun getConnectionSecret(): String {
@@ -41,16 +42,6 @@ class ManagedConfigManager(context: Context) {
     fun clearConnectionSecret() {
         prefs.edit().remove("cached_connection_secret").apply()
         setRegistered(false)
-    }
-
-    fun getManualAddress(): String = prefs.getString("manual_server_address", "") ?: ""
-    fun getManualPort(): String = prefs.getString("manual_server_port", "") ?: ""
-
-    fun setManualServerConfig(address: String, port: String) {
-        prefs.edit()
-            .putString("manual_server_address", address)
-            .putString("manual_server_port", port)
-            .apply()
     }
 
     fun hasManagedConfig(): Boolean {
