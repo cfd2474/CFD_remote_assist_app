@@ -83,7 +83,7 @@ class LocationTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         configManager = ManagedConfigManager(this)
-        networkManager = NetworkManager(this, configManager)
+        networkManager = NetworkManager.getInstance(this, configManager)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         loadManagedConfigurations()
         

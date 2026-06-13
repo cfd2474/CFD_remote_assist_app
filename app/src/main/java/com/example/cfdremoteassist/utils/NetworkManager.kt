@@ -10,7 +10,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-class NetworkManager(private val context: Context, private val configManager: ManagedConfigManager) {
+class NetworkManager private constructor(private val context: Context, private val configManager: ManagedConfigManager) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -206,6 +206,11 @@ class NetworkManager(private val context: Context, private val configManager: Ma
     }
 
     fun sendWebSocketMessage(json: String) {
+        if (webSocket == null) {
+            Log.w("NetworkManager", "WS not connected, trying fallback signaling...")
+            postSignaling(json)
+            return
+        }
         webSocket?.send(json)
     }
 
@@ -246,5 +251,69 @@ class NetworkManager(private val context: Context, private val configManager: Ma
                 response.close()
             }
         })
+    }
+
+    fun pollSignaling(onMessagesReceived: (List<JsonObject>) -> Unit) {
+        val baseUrl = configManager.getTrackingServerUrl()
+        val secret = configManager.getConnectionSecret()
+        if (baseUrl.isEmpty() || secret.isEmpty()) return
+
+        val url = "$baseUrl/api/v1/signaling"
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .addHeader("X-Connection-Secret", secret)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {}
+            override fun onResponse(call: Call, response: Response) {
+                if (response.code == 200) {
+                    val body = response.body?.string() ?: return
+                    try {
+                        val json = gson.fromJson(body, JsonObject::class.java)
+                        val messagesArray = json.getAsJsonArray("messages")
+                        if (messagesArray != null && messagesArray.size() > 0) {
+                            val messages = mutableListOf<JsonObject>()
+                            messagesArray.forEach { messages.add(it.asJsonObject) }
+                            onMessagesReceived(messages)
+                        }
+                    } catch (e: Exception) {}
+                }
+                response.close()
+            }
+        })
+    }
+
+    fun postSignaling(json: String) {
+        val baseUrl = configManager.getTrackingServerUrl()
+        val secret = configManager.getConnectionSecret()
+        if (baseUrl.isEmpty() || secret.isEmpty()) return
+
+        val url = "$baseUrl/api/v1/signaling"
+        val body = json.toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .addHeader("X-Connection-Secret", secret)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {}
+            override fun onResponse(call: Call, response: Response) {
+                response.close()
+            }
+        })
+    }
+
+    companion object {
+        @Volatile
+        private var INSTANCE: NetworkManager? = null
+
+        fun getInstance(context: Context, configManager: ManagedConfigManager): NetworkManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: NetworkManager(context.applicationContext, configManager).also { INSTANCE = it }
+            }
+        }
     }
 }

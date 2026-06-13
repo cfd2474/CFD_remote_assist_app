@@ -33,6 +33,9 @@ class ScreenShareService : Service() {
     private var videoCapturer: ScreenCapturerAndroid? = null
     private var localVideoTrack: VideoTrack? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
+    
+    private val pollHandler = Handler(Looper.getMainLooper())
+    private var pollRunnable: Runnable? = null
 
     companion object {
         const val EXTRA_RESULT_CODE = "result_code"
@@ -47,7 +50,7 @@ class ScreenShareService : Service() {
     override fun onCreate() {
         super.onCreate()
         configManager = ManagedConfigManager(this)
-        networkManager = NetworkManager(this, configManager)
+        networkManager = NetworkManager.getInstance(this, configManager)
         initWebRTC()
     }
 
@@ -164,6 +167,24 @@ class ScreenShareService : Service() {
             addProperty("type", "webrtc_ready")
         }
         networkManager.sendWebSocketMessage(gson.toJson(readyJson))
+        
+        startSignalingPoll()
+    }
+
+    private fun startSignalingPoll() {
+        pollRunnable = object : Runnable {
+            override fun run() {
+                networkManager.pollSignaling { messages ->
+                    messages.forEach { handleSignalingJsonObject(it) }
+                }
+                pollHandler.postDelayed(this, 2000) // Poll every 2 seconds during active session
+            }
+        }
+        pollHandler.postDelayed(pollRunnable!!, 2000)
+    }
+
+    private fun handleSignalingJsonObject(json: JsonObject) {
+        handleSignalingMessage(json.toString())
     }
 
     private fun setupPeerConnection() {
@@ -281,6 +302,7 @@ class ScreenShareService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        pollRunnable?.let { pollHandler.removeCallbacks(it) }
         try {
             videoCapturer?.stopCapture()
             videoCapturer?.dispose()

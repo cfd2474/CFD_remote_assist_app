@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     val context = LocalContext.current
     val configManager = remember { ManagedConfigManager(context) }
-    val networkManager = remember { NetworkManager(context, configManager) }
+    val networkManager = remember { NetworkManager.getInstance(context, configManager) }
     var isSettingsUnlocked by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     
