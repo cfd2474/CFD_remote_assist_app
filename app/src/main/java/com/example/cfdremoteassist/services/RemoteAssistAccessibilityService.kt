@@ -11,8 +11,12 @@ import android.view.KeyEvent
 import android.os.Bundle
 import android.view.InputDevice
 import android.view.View
+import android.app.Instrumentation
 
 class RemoteAssistAccessibilityService : AccessibilityService() {
+
+    private val instrumentation = Instrumentation()
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
@@ -148,7 +152,7 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
     fun handleKeyAction(key: String, inputMethod: String?) {
         Log.d("AccessibilityService", "Key Action: $key (method: $inputMethod)")
         
-        // 1. Navigation / Global Actions
+        // 1. Navigation / Global Actions (Priority)
         when (key) {
             "BACK", "KEYCODE_BACK" -> { performGlobalAction(GLOBAL_ACTION_BACK); return }
             "HOME", "KEYCODE_HOME" -> { performGlobalAction(GLOBAL_ACTION_HOME); return }
@@ -158,55 +162,86 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
             "POWER_DIALOG" -> { performGlobalAction(GLOBAL_ACTION_POWER_DIALOG); return }
         }
 
-        // 2. Hardware Keyboard Emulation (Experimental)
+        // 2. Hardware Keyboard Injection (Preferred if requested)
         if (inputMethod == "hardware_keyboard") {
-            // Note: AccessibilityService cannot easily inject raw KeyEvents into other apps.
-            // We'll try to find the focused node and perform actions if possible.
             injectHardwareKey(key)
             return
         }
 
-        // 3. Fallback to global action mapping
+        // 3. Fallback to global action mapping or IME-style injection
         performGlobalActionByName(key)
     }
 
-    private fun performGlobalActionByName(action: String) {
-        val normalized = if (action.startsWith("KEYCODE_")) action else "KEYCODE_$action"
-        
-        when (normalized) {
-            "KEYCODE_DPAD_UP" -> injectHardwareKey("KEYCODE_DPAD_UP")
-            "KEYCODE_DPAD_DOWN" -> injectHardwareKey("KEYCODE_DPAD_DOWN")
-            "KEYCODE_DPAD_LEFT" -> injectHardwareKey("KEYCODE_DPAD_LEFT")
-            "KEYCODE_DPAD_RIGHT" -> injectHardwareKey("KEYCODE_DPAD_RIGHT")
-            "KEYCODE_ENTER", "KEYCODE_NUMPAD_ENTER" -> injectHardwareKey("KEYCODE_ENTER")
-            "KEYCODE_DEL", "KEYCODE_BACKSPACE" -> injectHardwareKey("KEYCODE_DEL")
-            "KEYCODE_SPACE" -> injectHardwareKey("KEYCODE_SPACE")
-            "KEYCODE_TAB" -> injectHardwareKey("KEYCODE_TAB")
-            "KEYCODE_ESCAPE" -> performGlobalAction(GLOBAL_ACTION_BACK)
-            else -> {
-                // If it's a single character or starts with KEYCODE_ and has one char after
-                if (action.length == 1) {
-                    injectChar(action[0])
-                } else if (normalized.length == 9 && normalized.startsWith("KEYCODE_")) {
-                    injectChar(normalized.last())
-                }
-            }
+    private fun injectHardwareKey(key: String) {
+        val (keyCode, metaState) = parseKeyAndModifiers(key)
+        if (keyCode != KeyEvent.KEYCODE_UNKNOWN) {
+            injectKeyEvent(keyCode, metaState)
+        } else if (key.length == 1) {
+            // Fallback for single characters
+            injectChar(key[0])
         }
     }
 
-    private fun injectHardwareKey(keyName: String) {
-        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        
-        when (keyName) {
-            "KEYCODE_ENTER" -> {
-                if (node != null) {
-                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                } else {
-                    // Try to click center of screen as fallback for DPAD_CENTER/ENTER
-                    performClick(0.5f, 0.5f)
+    private fun parseKeyAndModifiers(key: String): Pair<Int, Int> {
+        var metaState = 0
+        var keyPart = key
+
+        if (key.contains("+")) {
+            val parts = key.split("+")
+            parts.dropLast(1).forEach { mod ->
+                when (mod.lowercase()) {
+                    "ctrl" -> metaState = metaState or KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+                    "shift" -> metaState = metaState or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
+                    "alt" -> metaState = metaState or KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON
+                    "meta", "win", "cmd" -> metaState = metaState or KeyEvent.META_META_ON or KeyEvent.META_META_LEFT_ON
                 }
             }
-            "KEYCODE_DEL" -> {
+            keyPart = parts.last()
+        }
+
+        val normalized = if (keyPart.startsWith("KEYCODE_")) keyPart.uppercase() else "KEYCODE_${keyPart.uppercase()}"
+        val keyCode = try {
+            KeyEvent::class.java.getField(normalized).getInt(null)
+        } catch (e: Exception) {
+            when (keyPart.uppercase()) {
+                "ENTER" -> KeyEvent.KEYCODE_ENTER
+                "DEL", "BACKSPACE" -> KeyEvent.KEYCODE_DEL
+                "SPACE" -> KeyEvent.KEYCODE_SPACE
+                "TAB" -> KeyEvent.KEYCODE_TAB
+                "UP" -> KeyEvent.KEYCODE_DPAD_UP
+                "DOWN" -> KeyEvent.KEYCODE_DPAD_DOWN
+                "LEFT" -> KeyEvent.KEYCODE_DPAD_LEFT
+                "RIGHT" -> KeyEvent.KEYCODE_DPAD_RIGHT
+                "ESC", "ESCAPE" -> KeyEvent.KEYCODE_ESCAPE
+                else -> KeyEvent.KEYCODE_UNKNOWN
+            }
+        }
+        return Pair(keyCode, metaState)
+    }
+
+    private fun injectKeyEvent(keyCode: Int, metaState: Int = 0) {
+        Thread {
+            try {
+                val downTime = android.os.SystemClock.uptimeMillis()
+                val eventDown = KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, keyCode, 0, metaState, 
+                    android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD)
+                instrumentation.sendKeySync(eventDown)
+                
+                val eventUp = KeyEvent(downTime, android.os.SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, keyCode, 0, metaState, 
+                    android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD)
+                instrumentation.sendKeySync(eventUp)
+                Log.d("AccessibilityService", "Injected hardware key $keyCode (meta $metaState)")
+            } catch (e: Exception) {
+                Log.e("AccessibilityService", "Hardware injection failed: ${e.message}")
+                handler.post { injectLegacyKey(keyCode) }
+            }
+        }.start()
+    }
+
+    private fun injectLegacyKey(keyCode: Int) {
+        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        when (keyCode) {
+            KeyEvent.KEYCODE_DEL -> {
                 if (node != null && node.className?.contains("EditText") == true) {
                     val currentText = (node.text ?: "").toString()
                     if (currentText.isNotEmpty()) {
@@ -216,14 +251,20 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
                     }
                 }
             }
-            "KEYCODE_DPAD_UP" -> performSwipe(0.5f, 0.6f, 0.5f, 0.4f, 100)
-            "KEYCODE_DPAD_DOWN" -> performSwipe(0.5f, 0.4f, 0.5f, 0.6f, 100)
-            "KEYCODE_DPAD_LEFT" -> performSwipe(0.6f, 0.5f, 0.4f, 0.5f, 100)
-            "KEYCODE_DPAD_RIGHT" -> performSwipe(0.4f, 0.5f, 0.6f, 0.5f, 100)
-            "KEYCODE_TAB" -> {
-                // Accessibility focus move
-                rootInActiveWindow?.focusSearch(View.FOCUS_FORWARD)?.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            }
+            KeyEvent.KEYCODE_ENTER -> node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            KeyEvent.KEYCODE_DPAD_UP -> performSwipe(0.5f, 0.6f, 0.5f, 0.4f, 100)
+            KeyEvent.KEYCODE_DPAD_DOWN -> performSwipe(0.5f, 0.4f, 0.5f, 0.6f, 100)
+            KeyEvent.KEYCODE_DPAD_LEFT -> performSwipe(0.6f, 0.5f, 0.4f, 0.5f, 100)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> performSwipe(0.4f, 0.5f, 0.6f, 0.5f, 100)
+        }
+    }
+
+    private fun performGlobalActionByName(action: String) {
+        val (keyCode, _) = parseKeyAndModifiers(action)
+        if (keyCode != KeyEvent.KEYCODE_UNKNOWN) {
+            injectLegacyKey(keyCode)
+        } else if (action.length == 1) {
+            injectChar(action[0])
         }
     }
 
