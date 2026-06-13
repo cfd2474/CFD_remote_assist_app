@@ -167,19 +167,27 @@ class ScreenShareService : Service() {
 
     private fun handleSignalingMessage(message: String) {
         try {
-            val json = gson.fromJson(message, JsonObject.get("payload")?.asString ?: message, JsonObject::class.java)
+            val json = gson.fromJson(message, JsonObject::class.java)
             val signal = json.get("signal")?.asString
             
             when (signal) {
                 "offer" -> {
-                    val sdp = gson.fromJson(json.get("sdp"), SessionDescription::class.java)
+                    val sdpObj = json.getAsJsonObject("sdp")
+                    val sdp = SessionDescription(
+                        SessionDescription.Type.OFFER,
+                        sdpObj.get("description").asString
+                    )
                     peerConnection?.setRemoteDescription(SimpleSdpObserver {
                         peerConnection?.createAnswer(SimpleSdpObserver { answer ->
                             peerConnection?.setLocalDescription(SimpleSdpObserver {
                                 val answerJson = JsonObject().apply {
                                     addProperty("type", "webrtc")
                                     addProperty("signal", "answer")
-                                    add("sdp", gson.toJsonTree(answer))
+                                    val sdpAnswer = JsonObject().apply {
+                                        addProperty("type", answer.type.canonicalForm())
+                                        addProperty("description", answer.description)
+                                    }
+                                    add("sdp", sdpAnswer)
                                 }
                                 networkManager.sendWebSocketMessage(gson.toJson(answerJson))
                             }, null)
@@ -187,7 +195,12 @@ class ScreenShareService : Service() {
                     }, sdp)
                 }
                 "ice" -> {
-                    val candidate = gson.fromJson(json.get("candidate"), IceCandidate::class.java)
+                    val candidateObj = json.getAsJsonObject("candidate")
+                    val candidate = IceCandidate(
+                        candidateObj.get("sdpMid").asString,
+                        candidateObj.get("sdpMLineIndex").asInt,
+                        candidateObj.get("sdp").asString
+                    )
                     peerConnection?.addIceCandidate(candidate)
                 }
             }
