@@ -33,6 +33,7 @@ class ScreenShareService : Service() {
     private var videoCapturer: ScreenCapturerAndroid? = null
     private var localVideoTrack: VideoTrack? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
+    private var eglBase: EglBase? = null
     
     private val pollHandler = Handler(Looper.getMainLooper())
     private var pollRunnable: Runnable? = null
@@ -61,13 +62,13 @@ class ScreenShareService : Service() {
                 .createInitializationOptions()
         )
 
+        eglBase = EglBase.create()
         val options = PeerConnectionFactory.Options()
-        val eglBaseContext = EglBase.create().eglBaseContext
         
         peerConnectionFactory = PeerConnectionFactory.builder()
             .setOptions(options)
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBaseContext, true, true))
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBaseContext))
+            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase!!.eglBaseContext, true, true))
+            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase!!.eglBaseContext))
             .createPeerConnectionFactory()
     }
 
@@ -152,22 +153,28 @@ class ScreenShareService : Service() {
 
         videoSource = peerConnectionFactory?.createVideoSource(videoCapturer!!.isScreencast)
         
-        surfaceTextureHelper = SurfaceTextureHelper.create("WebRTC-SurfaceHelper", EglBase.create().eglBaseContext)
+        surfaceTextureHelper = SurfaceTextureHelper.create("WebRTC-SurfaceHelper", eglBase!!.eglBaseContext)
         videoCapturer!!.initialize(surfaceTextureHelper, this, videoSource!!.capturerObserver)
         
         // Use full screen metrics
         videoCapturer!!.startCapture(metrics.widthPixels, metrics.heightPixels, 30)
 
         localVideoTrack = peerConnectionFactory?.createVideoTrack("VIDEO_TRACK", videoSource)
+        localVideoTrack?.setEnabled(true)
         
         setupPeerConnection()
 
-        // Signal to portal that we are ready for the offer
-        val readyJson = JsonObject().apply {
-            addProperty("type", "webrtc_ready")
-        }
-        networkManager.sendWebSocketMessage(gson.toJson(readyJson))
-        sendDeviceEvent("WEBRTC_READY")
+        // Delay signaling readiness to ensure capture hardware is warm
+        handler.postDelayed({
+            if (videoCapturer != null) {
+                Log.d("ScreenShare", "Sending WEBRTC_READY signal")
+                val readyJson = JsonObject().apply {
+                    addProperty("type", "webrtc_ready")
+                }
+                networkManager.sendWebSocketMessage(gson.toJson(readyJson))
+                sendDeviceEvent("WEBRTC_READY")
+            }
+        }, 1500)
         
         startSignalingPoll()
     }
@@ -194,8 +201,12 @@ class ScreenShareService : Service() {
         )
 
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers)
+        rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+        rtcConfig.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+        
         peerConnection = peerConnectionFactory?.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate) {
+                Log.d("ScreenShare", "Local ICE Candidate Gathered: ${candidate.sdp}")
                 val iceJson = JsonObject().apply {
                     addProperty("type", "webrtc")
                     val iceObj = JsonObject().apply {
@@ -205,10 +216,11 @@ class ScreenShareService : Service() {
                     }
                     add("ice", iceObj)
                 }
-                Log.d("ScreenShare", "Sending Local ICE Candidate")
                 networkManager.sendWebSocketMessage(gson.toJson(iceJson))
             }
-            override fun onSignalingChange(state: PeerConnection.SignalingState) {}
+            override fun onSignalingChange(state: PeerConnection.SignalingState) {
+                Log.d("ScreenShare", "Signaling State: $state")
+            }
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
                 Log.d("ScreenShare", "ICE Connection State: $state")
                 if (state == PeerConnection.IceConnectionState.CONNECTED) {
@@ -227,11 +239,13 @@ class ScreenShareService : Service() {
             override fun onAddStream(stream: MediaStream) {}
             override fun onRemoveStream(stream: MediaStream) {}
             override fun onDataChannel(channel: DataChannel) {}
-            override fun onRenegotiationNeeded() {}
+            override fun onRenegotiationNeeded() {
+                Log.d("ScreenShare", "Renegotiation Needed")
+            }
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {}
         })
 
-        // Use proper stream identification to trigger ICE gathering
+        Log.d("ScreenShare", "Adding local video track to PeerConnection")
         peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
     }
 
@@ -320,6 +334,7 @@ class ScreenShareService : Service() {
             videoSource?.dispose()
             peerConnection?.dispose()
             peerConnectionFactory?.dispose()
+            eglBase?.release()
         } catch (e: Exception) {
             Log.e("ScreenShare", "Error during disposal: ${e.message}")
         }

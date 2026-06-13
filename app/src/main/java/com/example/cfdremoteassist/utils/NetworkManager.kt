@@ -187,12 +187,12 @@ class NetworkManager private constructor(private val context: Context, private v
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("NetworkManager", "WebSocket Closed ($code)")
+                Log.w("NetworkManager", "WebSocket Closed ($code): $reason")
                 this@NetworkManager.webSocket = null
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("NetworkManager", "WebSocket Failure: ${t.message}")
+                Log.e("NetworkManager", "WebSocket Failure: ${t.message}", t)
                 this@NetworkManager.webSocket = null
             }
         })

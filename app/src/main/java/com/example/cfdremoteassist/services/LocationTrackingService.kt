@@ -122,6 +122,7 @@ class LocationTrackingService : Service() {
                 val secret = configManager.getConnectionSecret()
                 if (secret.isNotEmpty()) {
                     if (!networkManager.isWebSocketConnected()) {
+                        // Check if we are in active remote session, maybe wait longer?
                         Log.i("LocationTracking", "WebSocket disconnected, attempting reconnect...")
                         connectRealTimeGateway() 
                     } else {
@@ -129,10 +130,11 @@ class LocationTrackingService : Service() {
                         networkManager.sendKeepAlive()
                     }
                 }
-                wsRetryHandler.postDelayed(this, TimeUnit.SECONDS.toMillis(30))
+                // Use longer interval for the pulse itself, let NetworkManager's internal state guide
+                wsRetryHandler.postDelayed(this, TimeUnit.SECONDS.toMillis(45))
             }
         }
-        wsRetryHandler.postDelayed(wsRetryRunnable!!, TimeUnit.SECONDS.toMillis(30))
+        wsRetryHandler.postDelayed(wsRetryRunnable!!, TimeUnit.SECONDS.toMillis(45))
     }
 
     private fun connectRealTimeGateway() {
