@@ -18,6 +18,7 @@ class NetworkManager(private val context: Context, private val configManager: Ma
     
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private var webSocket: WebSocket? = null
 
     fun register(deviceInfo: Map<String, String>, callback: (Boolean, String?) -> Unit) {
         val baseUrl = configManager.getTrackingServerUrl()
@@ -126,6 +127,96 @@ class NetworkManager(private val context: Context, private val configManager: Ma
                 if (response.code == 401) {
                     Log.w("NetworkManager", "Telemetry auth failed. Clearing secret.")
                     configManager.clearConnectionSecret()
+                }
+                response.close()
+            }
+        })
+    }
+
+    fun connectWebSocket(uid: String, secret: String, onCommand: (String) -> Unit) {
+        val baseUrl = configManager.getTrackingServerUrl()
+        if (baseUrl.isEmpty()) return
+        
+        // If already connected, don't re-create unless necessary
+        // For now, let's keep it simple and rely on the service to manage lifecycle
+        if (webSocket != null) return
+
+        val wsUrl = baseUrl.replace("https://", "wss://")
+            .replace("http://", "ws://")
+            .trimEnd('/') + "/ws/device"
+
+        val request = Request.Builder().url(wsUrl).build()
+        
+        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.d("NetworkManager", "WebSocket Opened. Sending auth...")
+                val auth = JsonObject().apply {
+                    addProperty("type", "auth")
+                    addProperty("uid", uid)
+                    addProperty("connection_secret", secret)
+                }
+                webSocket.send(gson.toJson(auth))
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                Log.d("NetworkManager", "WS Message: $text")
+                try {
+                    val json = gson.fromJson(text, JsonObject::class.java)
+                    when (json.get("type")?.asString) {
+                        "auth_ok" -> Log.i("NetworkManager", "WS Auth Successful")
+                        "command" -> {
+                            val cmd = json.get("command")?.asString
+                            val incomingSecret = json.get("connection_secret")?.asString
+                            if (cmd != null && incomingSecret == secret) {
+                                onCommand(cmd)
+                            } else {
+                                Log.w("NetworkManager", "WS Command rejected: Invalid secret or missing cmd")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("NetworkManager", "Error parsing WS message", e)
+                }
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+                Log.d("NetworkManager", "WebSocket Closing: $reason")
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e("NetworkManager", "WebSocket Failure: ${t.message}")
+            }
+        })
+    }
+
+    fun disconnectWebSocket() {
+        webSocket?.close(1000, "App Service Stopping")
+        webSocket = null
+    }
+
+    fun pollCommands(callback: (List<String>) -> Unit) {
+        val baseUrl = configManager.getTrackingServerUrl()
+        val secret = configManager.getConnectionSecret()
+        if (baseUrl.isEmpty() || secret.isEmpty()) return
+
+        val url = "$baseUrl/api/v1/commands"
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .addHeader("X-Connection-Secret", secret)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {}
+            override fun onResponse(call: Call, response: Response) {
+                if (response.code == 200) {
+                    val body = response.body?.string() ?: return
+                    try {
+                        val json = gson.fromJson(body, JsonObject::class.java)
+                        val commands = json.getAsJsonArray("commands")?.map { it.asString } ?: emptyList()
+                        callback(commands)
+                    } catch (e: Exception) {}
                 }
                 response.close()
             }

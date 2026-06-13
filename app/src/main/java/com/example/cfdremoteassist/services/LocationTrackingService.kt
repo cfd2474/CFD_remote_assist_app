@@ -46,6 +46,12 @@ class LocationTrackingService : Service() {
     
     private val deviceUpdateHandler = Handler(Looper.getMainLooper())
     private var deviceUpdateRunnable: Runnable? = null
+    
+    private val wsRetryHandler = Handler(Looper.getMainLooper())
+    private var wsRetryRunnable: Runnable? = null
+    
+    private val pollHandler = Handler(Looper.getMainLooper())
+    private var pollRunnable: Runnable? = null
 
     companion object {
         const val ACTION_STOP_PING = "com.example.cfdremoteassist.STOP_PING"
@@ -82,6 +88,65 @@ class LocationTrackingService : Service() {
         }
         
         scheduleDeviceUpdatePulse()
+        connectRealTimeGateway()
+        scheduleWSPulse()
+        schedulePollPulse()
+    }
+
+    private fun schedulePollPulse() {
+        pollRunnable = object : Runnable {
+            override fun run() {
+                networkManager.pollCommands { commands ->
+                    commands.forEach { handleRemoteCommand(it) }
+                }
+                pollHandler.postDelayed(this, TimeUnit.SECONDS.toMillis(30))
+            }
+        }
+        pollHandler.postDelayed(pollRunnable!!, TimeUnit.SECONDS.toMillis(30))
+    }
+
+    private fun scheduleWSPulse() {
+        wsRetryRunnable = object : Runnable {
+            override fun run() {
+                // Ensure WS is connected if secret is present
+                val secret = configManager.getConnectionSecret()
+                if (secret.isNotEmpty()) {
+                    connectRealTimeGateway() // Logic inside NetworkManager handles existing connections
+                }
+                wsRetryHandler.postDelayed(this, TimeUnit.MINUTES.toMillis(1))
+            }
+        }
+        wsRetryHandler.postDelayed(wsRetryRunnable!!, TimeUnit.MINUTES.toMillis(1))
+    }
+
+    private fun connectRealTimeGateway() {
+        val uid = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        val secret = configManager.getConnectionSecret()
+        
+        if (secret.isEmpty()) {
+            Log.w("LocationTracking", "No connection secret, skipping WS gateway")
+            return
+        }
+
+        networkManager.connectWebSocket(uid, secret) { command ->
+            handleRemoteCommand(command)
+        }
+    }
+
+    private fun handleRemoteCommand(command: String) {
+        val intent = Intent(this, LocationTrackingService::class.java).apply {
+            action = when (command) {
+                "TRIGGER_PING" -> ACTION_TRIGGER_PING
+                "REQUEST_LOCATION" -> ACTION_REQUEST_LOCATION
+                "START_REMOTE_ADMIN" -> ACTION_START_REMOTE_ADMIN
+                "STOP_REMOTE_ADMIN" -> ACTION_STOP_REMOTE_ADMIN
+                "LOCK_DEVICE" -> ACTION_LOCK_DEVICE
+                else -> null
+            }
+        }
+        if (intent.action != null) {
+            startService(intent)
+        }
     }
 
     private fun scheduleDeviceUpdatePulse() {
@@ -335,5 +400,8 @@ class LocationTrackingService : Service() {
         unregisterReceiver(restrictionsReceiver)
         fusedLocationClient.removeLocationUpdates(locationCallback)
         deviceUpdateRunnable?.let { deviceUpdateHandler.removeCallbacks(it) }
+        wsRetryRunnable?.let { wsRetryHandler.removeCallbacks(it) }
+        pollRunnable?.let { pollHandler.removeCallbacks(it) }
+        networkManager.disconnectWebSocket()
     }
 }
