@@ -106,7 +106,11 @@ class LocationTrackingService : Service() {
         val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         
         val deviceInfo = mutableMapOf<String, String>()
-        deviceInfo["serial"] = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Build.getSerial() else "unknown"
+        deviceInfo["serial"] = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Build.getSerial() else "unknown"
+        } catch (e: SecurityException) {
+            "permission_denied"
+        }
         deviceInfo["imei"] = try { telephonyManager.deviceId ?: "unknown" } catch (e: Exception) { "permission_denied" }
         deviceInfo["phone_number"] = try { telephonyManager.line1Number ?: "unknown" } catch (e: Exception) { "unknown" }
         deviceInfo["device_name"] = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL
