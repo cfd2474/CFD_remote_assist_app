@@ -61,6 +61,10 @@ class AccessibilityKeyInjector(
 
         return when (event.keyCode) {
             KeyEvent.KEYCODE_DEL -> injectDel(node)
+            KeyEvent.KEYCODE_DPAD_LEFT -> moveCursor(-1, node)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> moveCursor(1, node)
+            KeyEvent.KEYCODE_MOVE_HOME -> moveCursor(-9999, node)
+            KeyEvent.KEYCODE_MOVE_END -> moveCursor(9999, node)
             KeyEvent.KEYCODE_ENTER -> {
                 var acted = false
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -129,6 +133,36 @@ class AccessibilityKeyInjector(
             cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newPos)
             cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newPos)
             node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursorBundle)
+        }
+        return success
+    }
+
+    private fun moveCursor(delta: Int, node: AccessibilityNodeInfo): Boolean {
+        val text = lastNodeText ?: (node.text ?: "").toString()
+        if (text.isEmpty()) return true
+
+        val start = if (lastSelectionStart < 0) text.length else lastSelectionStart.coerceAtMost(text.length)
+        val end = if (lastSelectionEnd < 0) text.length else lastSelectionEnd.coerceAtMost(text.length)
+        
+        var newPos: Int
+        if (delta < 0) {
+            // Left
+            newPos = if (start != end) start.coerceAtMost(end) else (start + delta).coerceAtLeast(0)
+        } else {
+            // Right
+            newPos = if (start != end) start.coerceAtLeast(end) else (start + delta).coerceAtMost(text.length)
+        }
+
+        Log.d(tag, "Shadow moveCursor to: $newPos (delta: $delta, prev: $start-$end)")
+        
+        val cursorBundle = Bundle()
+        cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newPos)
+        cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newPos)
+        val success = node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursorBundle)
+        
+        if (success) {
+            lastSelectionStart = newPos
+            lastSelectionEnd = newPos
         }
         return success
     }
