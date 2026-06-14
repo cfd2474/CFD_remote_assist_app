@@ -183,14 +183,18 @@ class LocationTrackingService : Service() {
     }
 
     private fun wakeUpDevice() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        @Suppress("DEPRECATION")
-        val wakeLock = powerManager.newWakeLock(
-            PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
-            "RemoteAssist:WakeUp"
-        )
-        wakeLock.acquire(3000)
-        Log.d("LocationTracking", "Device wake-up signal sent")
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            val wakeLock = powerManager.newWakeLock(
+                PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                "RemoteAssist:WakeUp"
+            )
+            wakeLock.acquire(3000)
+            Log.d("LocationTracking", "Device wake-up signal sent")
+        } catch (e: Exception) {
+            Log.e("LocationTracking", "Failed to wake up device: ${e.message}")
+        }
     }
 
     private fun handleIncomingJsonCommand(json: JsonObject) {

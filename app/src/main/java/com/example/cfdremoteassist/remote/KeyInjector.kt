@@ -77,6 +77,7 @@ class AccessibilityKeyInjector(
             }
             else -> {
                 val unicodeChar = event.getUnicodeChar(event.metaState)
+                Log.d(tag, "inject key: ${event.keyCode} | unicode: $unicodeChar")
                 if (unicodeChar != 0) {
                     injectChar(unicodeChar.toChar(), node)
                 } else {
@@ -111,6 +112,7 @@ class AccessibilityKeyInjector(
                 sb.insert(start, char)
             }
         } catch (e: Exception) {
+            Log.e(tag, "Failed to insert character: ${e.message}", e)
             sb.append(char)
         }
         
@@ -188,6 +190,7 @@ class AccessibilityKeyInjector(
                 return true 
             }
         } catch (e: Exception) {
+            Log.e(tag, "Failed to delete character: ${e.message}", e)
             return false
         }
 

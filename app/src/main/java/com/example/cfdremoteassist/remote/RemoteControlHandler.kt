@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.KeyCharacterMap
 import org.json.JSONObject
 import java.util.Locale
 
@@ -154,7 +155,7 @@ class RemoteControlHandler(
             parsed.keyCode,
             0,
             parsed.metaState,
-            0,
+            KeyCharacterMap.VIRTUAL_KEYBOARD,
             0,
             KeyEvent.FLAG_FROM_SYSTEM,
             source,
@@ -166,7 +167,7 @@ class RemoteControlHandler(
             parsed.keyCode,
             0,
             parsed.metaState,
-            0,
+            KeyCharacterMap.VIRTUAL_KEYBOARD,
             0,
             KeyEvent.FLAG_FROM_SYSTEM,
             source,
