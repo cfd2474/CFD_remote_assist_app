@@ -157,28 +157,32 @@ class LocationTrackingService : Service() {
     }
 
     private fun handleGenericWSMessage(json: JsonObject) {
-        val secret = configManager.getConnectionSecret()
-        val type = json.get("type")?.asString
-        
-        when (type) {
-            "command" -> {
-                val incomingSecret = json.get("connection_secret")?.asString
-                if (incomingSecret == secret) {
-                    handleIncomingJsonCommand(json)
+        try {
+            val secret = configManager.getConnectionSecret()
+            val type = json.get("type")?.asString
+            
+            when (type) {
+                "command" -> {
+                    val incomingSecret = json.get("connection_secret")?.asString
+                    if (incomingSecret == secret) {
+                        handleIncomingJsonCommand(json)
+                    }
                 }
-            }
-            "webrtc" -> {
-                val intent = Intent(this, ScreenShareService::class.java).apply {
-                    action = ScreenShareService.ACTION_PROCESS_SIGNAL
-                    putExtra(ScreenShareService.EXTRA_SIGNAL, json.toString())
+                "webrtc" -> {
+                    val intent = Intent(this, ScreenShareService::class.java).apply {
+                        action = ScreenShareService.ACTION_PROCESS_SIGNAL
+                        putExtra(ScreenShareService.EXTRA_SIGNAL, json.toString())
+                    }
+                    startService(intent)
                 }
-                startService(intent)
+                "control" -> {
+                    handleRemoteControl(json)
+                }
+                "auth_ok" -> Log.i("LocationTracking", "WebSocket Authenticated")
+                "pong" -> Log.d("LocationTracking", "WS Heartbeat received")
             }
-            "control" -> {
-                handleRemoteControl(json)
-            }
-            "auth_ok" -> Log.i("LocationTracking", "WebSocket Authenticated")
-            "pong" -> Log.d("LocationTracking", "WS Heartbeat received")
+        } catch (e: Exception) {
+            Log.e("LocationTracking", "Error handling WS message: ${e.message}")
         }
     }
 
@@ -198,28 +202,34 @@ class LocationTrackingService : Service() {
     }
 
     private fun handleIncomingJsonCommand(json: JsonObject) {
-        val cmd = json.get("command")?.asString ?: return
-        Log.i("LocationTracking", "Executing Command: $cmd")
-        
-        if (cmd == "START_REMOTE_ADMIN") {
-            RemoteSessionManager.isSessionActive = true
-            wakeUpDevice()
-        } else if (cmd == "STOP_REMOTE_ADMIN") {
-            RemoteSessionManager.isSessionActive = false
-        }
-        
-        val intent = Intent(this, LocationTrackingService::class.java).apply {
-            action = when (cmd) {
-                "TRIGGER_PING" -> ACTION_TRIGGER_PING
-                "REQUEST_LOCATION" -> ACTION_REQUEST_LOCATION
-                "START_REMOTE_ADMIN" -> ACTION_START_REMOTE_ADMIN
-                "STOP_REMOTE_ADMIN" -> ACTION_STOP_REMOTE_ADMIN
-                "LOCK_DEVICE" -> ACTION_LOCK_DEVICE
-                else -> null
+        try {
+            val cmd = json.get("command")?.asString ?: return
+            Log.i("LocationTracking", "Executing Command: $cmd")
+            
+            if (cmd == "START_REMOTE_ADMIN") {
+                RemoteSessionManager.isSessionActive = true
+                networkManager.setSessionActive(true)
+                wakeUpDevice()
+            } else if (cmd == "STOP_REMOTE_ADMIN") {
+                RemoteSessionManager.isSessionActive = false
+                networkManager.setSessionActive(false)
             }
-        }
-        if (intent.action != null) {
-            startService(intent)
+            
+            val intent = Intent(this, LocationTrackingService::class.java).apply {
+                action = when (cmd) {
+                    "TRIGGER_PING" -> ACTION_TRIGGER_PING
+                    "REQUEST_LOCATION" -> ACTION_REQUEST_LOCATION
+                    "START_REMOTE_ADMIN" -> ACTION_START_REMOTE_ADMIN
+                    "STOP_REMOTE_ADMIN" -> ACTION_STOP_REMOTE_ADMIN
+                    "LOCK_DEVICE" -> ACTION_LOCK_DEVICE
+                    else -> null
+                }
+            }
+            if (intent.action != null) {
+                startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("LocationTracking", "Error processing command: ${e.message}")
         }
     }
 

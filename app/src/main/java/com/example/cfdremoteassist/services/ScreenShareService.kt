@@ -243,9 +243,13 @@ class ScreenShareService : Service() {
         Log.d("ScreenShare", "Starting capture at ${captureWidth}x${captureHeight}")
         
         // Keep screen on during active capture
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        screenWakeLock = powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "RemoteAssist:ScreenShare")
-        screenWakeLock?.acquire()
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            screenWakeLock = powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "RemoteAssist:ScreenShare")
+            screenWakeLock?.acquire()
+        } catch (e: Exception) {
+            Log.e("ScreenShare", "Failed to acquire screen wake lock: ${e.message}")
+        }
 
         videoCapturer!!.startCapture(captureWidth, captureHeight, 30)
 
